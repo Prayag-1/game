@@ -31,18 +31,36 @@ export const SIMPLE_HOUSE_RULES: HouseRules = {
   ghantiChips: 0,
 };
 
+/**
+ * Largest chip amount any single stake, fee or bet may be. Well inside
+ * Number.MAX_SAFE_INTEGER so that summing every transfer of a round can never
+ * lose precision.
+ */
+export const MAX_CHIP_AMOUNT = 2 ** 40;
+
+/** A whole number of chips in [min, MAX_CHIP_AMOUNT]. */
+export function isChipAmount(value: number, min: number): boolean {
+  return Number.isSafeInteger(value) && value >= min && value <= MAX_CHIP_AMOUNT;
+}
+
 export function validateHouseRules(rules: HouseRules): void {
-  if (!Number.isInteger(rules.thini) || rules.thini <= 0) {
+  if (!isChipAmount(rules.thini, 1)) {
     throw new RangeError("thini must be a positive integer number of chips");
   }
-  if (!Number.isInteger(rules.maxStakeMultiplier) || rules.maxStakeMultiplier < 1) {
+  if (!Number.isSafeInteger(rules.maxStakeMultiplier) || rules.maxStakeMultiplier < 1) {
     throw new RangeError("maxStakeMultiplier must be an integer >= 1");
   }
-  if (!Number.isInteger(rules.ghantiChips) || rules.ghantiChips < 0) {
+  if (!isChipAmount(rules.thini * rules.maxStakeMultiplier, 1)) {
+    throw new RangeError(`thini x maxStakeMultiplier must not exceed ${MAX_CHIP_AMOUNT} chips`);
+  }
+  if (!isChipAmount(rules.ghantiChips, 0)) {
     throw new RangeError("ghantiChips must be a non-negative integer");
   }
-  if (!Number.isInteger(rules.maxChyakhe) || rules.maxChyakhe < 0) {
+  if (!Number.isSafeInteger(rules.maxChyakhe) || rules.maxChyakhe < 0) {
     throw new RangeError("maxChyakhe must be a non-negative integer");
+  }
+  if (typeof rules.doubling !== "boolean" || typeof rules.chyakheEnabled !== "boolean") {
+    throw new TypeError("doubling and chyakheEnabled must be booleans");
   }
 }
 

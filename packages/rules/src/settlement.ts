@@ -1,23 +1,34 @@
 import { TURN_ORDER, type RoundInput, type RoundOutcome, type SeatId } from "./types.js";
 import { nextSeat } from "./seats.js";
 import { resolveThrow } from "./throw.js";
-import { stakeMultiplier, validateHouseRules } from "./houseRules.js";
+import { isChipAmount, stakeMultiplier, validateHouseRules } from "./houseRules.js";
 
 class Ledger {
   private readonly deltas = new Map<string, number>();
 
-  add(playerId: string, chips: number): void {
-    if (chips === 0) {
-      if (!this.deltas.has(playerId)) this.deltas.set(playerId, 0);
-      return;
-    }
-    this.deltas.set(playerId, (this.deltas.get(playerId) ?? 0) + chips);
+  /** Registers a player with no change, so they appear in the deltas. */
+  touch(playerId: string): void {
+    if (!this.deltas.has(playerId)) this.deltas.set(playerId, 0);
   }
 
-  /** Moves chips between two players, so the ledger can never drift. */
+  /**
+   * Moves chips between two players. This is the only way to change a delta,
+   * so the ledger can never drift.
+   */
   transfer(from: string, to: string, chips: number): void {
-    this.add(from, -chips);
-    this.add(to, chips);
+    if (!Number.isSafeInteger(chips) || chips < 0) {
+      throw new RangeError(`transfer must be a whole, non-negative number of chips, got ${chips}`);
+    }
+    this.bump(from, -chips);
+    this.bump(to, chips);
+  }
+
+  private bump(playerId: string, chips: number): void {
+    const next = (this.deltas.get(playerId) ?? 0) + chips;
+    if (!Number.isSafeInteger(next)) {
+      throw new RangeError(`delta for ${playerId} left the safe integer range`);
+    }
+    this.deltas.set(playerId, next);
   }
 
   finish(): Record<string, number> {
@@ -57,7 +68,7 @@ export function settleRound(input: RoundInput): RoundOutcome {
     if (bet.seat === thrower) {
       throw new Error("a chyakhe may not bet on the thrower's seat");
     }
-    if (!Number.isInteger(bet.chips) || bet.chips <= 0) {
+    if (!isChipAmount(bet.chips, 1)) {
       throw new RangeError("a chyakhe bet must be a positive whole number of chips");
     }
   }
@@ -72,12 +83,12 @@ export function settleRound(input: RoundInput): RoundOutcome {
   );
 
   const ledger = new Ledger();
-  ledger.add(throwerPlayer, 0);
+  ledger.touch(throwerPlayer);
   for (const seat of otherSeats) {
     const p = occupants[seat];
-    if (p !== undefined) ledger.add(p, 0);
+    if (p !== undefined) ledger.touch(p);
   }
-  for (const bet of chyakhe) ledger.add(bet.playerId, 0);
+  for (const bet of chyakhe) ledger.touch(bet.playerId);
 
   let push = false;
 
