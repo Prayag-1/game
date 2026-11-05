@@ -13,6 +13,32 @@ Source for the rules: https://kbhom.wordpress.com/2013/10/19/rules-for-kauda-क
 | Default language | Nepali, with an English toggle |
 | Escalation | Ghanti, doubling and mar-taal all in, as switchable house rules |
 | Device floor | Mid-range Android on Chrome, iOS Safari 16+ |
+| Language and repo | TypeScript everywhere; pnpm + Turborepo monorepo |
+| Client | React + Vite, Three.js via React Three Fiber, Rapier physics |
+| Game server | Node + Colyseus |
+| Voice | LiveKit |
+| Data | Postgres + Drizzle for the ledger, Redis for presence |
+
+## Security rules (short form)
+
+The full threat model and reasoning are in `SECURITY.md`. These eight rules
+are hard. Do not break them, even temporarily.
+
+1. The server alone decides throws, balances and stakes. No client message
+   declares a winner or sets a balance.
+2. Randomness is `crypto.randomBytes` / `crypto.randomInt`. No `Math.random`
+   outside tests and cosmetic animation.
+3. Validate every inbound message against a schema, then against the table's
+   current phase and the player's real balance.
+4. Chips are an append-only ledger. Derive balances from entries, never
+   overwrite them.
+5. A username is not an identity. Identity is a signed, httpOnly,
+   SameSite=Lax cookie holding a 256-bit random session id stored on the
+   server.
+6. Never render user text as HTML: no `innerHTML`, no
+   `dangerouslySetInnerHTML`.
+7. No secrets in `@kauda/web` or in any `VITE_*` variable.
+8. Record every round with its seed so any hand can be replayed.
 
 ## The rules model, and why it is fair
 
@@ -71,8 +97,11 @@ A player who actually plays should confirm them.
 
 ## Build order
 
-1. `@kauda/rules` — done
-2. Headless table server plus bots
-3. 3D scene and the throw animation
-4. Guest login, public and private tables
-5. Voice chat, localisation, polish
+1. Rules engine (`@kauda/rules`) — done
+2. Table server plus bots
+3. Auth, lobby and tables
+4. 3D scene and the throw animation
+5. Voice
+6. Localisation and polish
+7. Security hardening
+8. Deploy and ops
