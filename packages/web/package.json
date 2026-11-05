@@ -1,0 +1,7 @@
+{
+  "name": "@kauda/web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": { "build": "echo not implemented yet", "test": "echo no tests yet", "typecheck": "echo nothing to check yet" }
+}
