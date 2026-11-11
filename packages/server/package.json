@@ -28,6 +28,7 @@
   },
   "devDependencies": {
     "@types/node": "^22",
+    "fast-check": "4.10.2",
     "typescript": "^5.7.0",
     "vitest": "^2.1.0"
   }

@@ -195,6 +195,15 @@ export class Ledger {
     return [...this.#entries];
   }
 
+  /** Entries from index `start` on, for a reader that keeps its place. */
+  entriesSince(start: number): readonly LedgerEntry[] {
+    return this.#entries.slice(Math.max(0, start));
+  }
+
+  get entryCount(): number {
+    return this.#entries.length;
+  }
+
   /** When this account last had an entry with this reason, or null. */
   lastEntryAt(playerId: string, reason: LedgerReason): number | null {
     for (let i = this.#entries.length - 1; i >= 0; i -= 1) {

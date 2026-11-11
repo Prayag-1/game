@@ -220,6 +220,71 @@ describe("seat filling", () => {
     expect(h.table.view().seats.teeya?.isBot).toBe(true);
   });
 
+  describe("capacity: never so many unseated that a seat cannot be filled (found by the fuzz test)", () => {
+    /** A on teeya, three fill bots, and eight unseated: the table is full at 12. */
+    function fullTable(unseatedBots: number): Harness {
+      const h = harness({}, 7, filling());
+      h.ok(h.table.join("A", { name: "A", buyIn: 1_000 }));
+      h.ok(h.table.handle("A", { type: "sit", seat: "teeya" }));
+      h.advance(0);
+      for (let i = 0; i < 8; i += 1) {
+        const isBot = i < unseatedBots;
+        h.ok(h.table.join(isBot ? `Z${i}` : `U${i}`, { name: `u${i}`, isBot, buyIn: 500 }));
+      }
+      expect(occupiedSeats(h) + h.table.view().chyakhe.length).toBe(12);
+      untilRevealing(h);
+      return h;
+    }
+
+    it("a human who stands up displaces an idle chyakhe bot, so a bot can fill the seat", () => {
+      const h = fullTable(1);
+      h.ok(h.table.handle("A", { type: "stand" }));
+      expect(h.table.view().chyakhe.map((p) => p.playerId)).not.toContain("Z0");
+      expect(h.table.balance("Z0")).toBe(0); // its chips went back to the mint
+      h.advance(h.table.timings.revealMs);
+      expect(h.table.phase).toBe("betting");
+      expect(occupiedSeats(h)).toBe(4);
+      h.table.ledger.verify();
+    });
+
+    it("refuses to stand a human when every chyakhe place is held by a human", () => {
+      const h = fullTable(0);
+      expect(h.table.handle("A", { type: "stand" })).toEqual({ ok: false, reason: "table-full" });
+      h.ok(h.table.handle("A", { type: "leave" })); // leaving is always possible
+      h.advance(h.table.timings.revealMs);
+      expect(occupiedSeats(h)).toBe(4);
+    });
+
+    it("refuses a newcomer once eight are unseated, unless an idle bot can make room", () => {
+      const h = fullTable(1);
+      h.ok(h.table.handle("A", { type: "leave" }));
+      // 3 seated, 8 unseated: one seat is empty and needs a bot.
+      expect(h.table.join("bot-new", { name: "b", isBot: true, buyIn: 500 })).toEqual({ ok: false, reason: "table-full" });
+      h.ok(h.table.join("V", { name: "V", buyIn: 500 })); // a human displaces Z0
+      expect(h.table.view().chyakhe.map((p) => p.playerId)).not.toContain("Z0");
+      expect(h.table.join("W", { name: "W", buyIn: 500 })).toEqual({ ok: false, reason: "table-full" });
+      h.advance(h.table.timings.revealMs);
+      expect(occupiedSeats(h)).toBe(4);
+    });
+
+    it("a broke human with no chyakhe place leaves the table and keeps their chips", () => {
+      const h = harness({ minChipsToSit: 10 }, 7, filling());
+      humanAndBots(h, [1_000, 1_000, 1_000], 1_000);
+      h.ok(h.table.join("B", { name: "B", buyIn: 25 }));
+      h.ok(h.table.handle("bot-chauka", { type: "leave" }));
+      h.ok(h.table.handle("B", { type: "sit", seat: "chauka" }));
+      for (let i = 0; i < 8; i += 1) h.ok(h.table.join(`U${i}`, { name: `u${i}`, buyIn: 500 }));
+      h.queue(3); // A hits: B pays 10, has 15, and cannot cover the next stake of 20
+      h.advance(0);
+      h.playRound("A");
+      const v = h.table.view();
+      expect(v.seats.chauka?.isBot).toBe(true);
+      expect(v.chyakhe.map((p) => p.playerId)).not.toContain("B");
+      expect(h.table.balance("B")).toBe(15);
+      expect(occupiedSeats(h) + v.chyakhe.length).toBe(12);
+    });
+  });
+
   it("keeps pushes rare over 5000 rounds, and still conserves chips", () => {
     // Small bot buy-ins, so bots go broke and are replaced again and again.
     const policy = botSeatFilling({ buyIn: 300, idPrefix: "fresh-" });

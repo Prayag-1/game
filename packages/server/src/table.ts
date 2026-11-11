@@ -71,6 +71,13 @@ export const DEFAULT_TIMINGS: Timings = {
 /** Four inside seats plus up to eight outside bettors. */
 export const MAX_PLAYERS = 12;
 
+/**
+ * At most this many players are ever unseated. Seats are capacity held back
+ * for whoever sits, so a bot can always be found room to fill an empty seat:
+ * with 9 unseated and one seat empty, a full table of 12 could not seat a bot.
+ */
+export const MAX_UNSEATED = MAX_PLAYERS - TURN_ORDER.length;
+
 export interface TableOptions {
   readonly tableId: string;
   readonly rules?: HouseRules;
@@ -345,6 +352,15 @@ export class Table {
     return [...this.#records];
   }
 
+  /** Settled rounds from index `start` on, for a reader that drains them in order. */
+  recordsSince(start: number): readonly RoundRecord[] {
+    return this.#records.slice(Math.max(0, start));
+  }
+
+  get roundCount(): number {
+    return this.#records.length;
+  }
+
   seatOf(playerId: string): SeatId | null {
     return TURN_ORDER.find((s) => this.#seats[s] === playerId) ?? null;
   }
@@ -401,7 +417,9 @@ export class Table {
     if (!isValidPlayerId(playerId) || playerId === MINT_ACCOUNT) return reject("malformed");
     if (opts.buyIn !== undefined && !isChipAmount(opts.buyIn, 1)) return reject("malformed");
     const existing = this.#players.get(playerId);
-    if (existing === undefined && this.#players.size >= MAX_PLAYERS) return reject("table-full");
+    // A newcomer is unseated. A human may displace an idle chyakhe bot to get
+    // in; a bot never displaces anyone.
+    if (existing === undefined && !this.#roomForOneMoreUnseated(!(opts.isBot ?? false))) return reject("table-full");
 
     if (existing === undefined) {
       this.#players.set(playerId, {
@@ -521,6 +539,9 @@ export class Table {
           return this.#clearReservation(player.id) ? OK : reject("not-seated");
         }
         if (!between) return reject("wrong-phase");
+        // Standing makes one more unseated player. With no chyakhe place and
+        // no idle chyakhe bot to give one up, the player can leave instead.
+        if (!this.#roomForOneMoreUnseated(true)) return reject("table-full");
         delete this.#seats[seat];
         return OK;
       }
@@ -670,10 +691,15 @@ export class Table {
       if (broke !== undefined) {
         const id = this.#seats[broke];
         const p = id === undefined ? undefined : this.#players.get(id);
-        delete this.#seats[broke];
         // With seat filling, a broke bot leaves and a fresh one replaces it.
-        // A broke human is only stood up, and keeps their real balance.
-        if (this.#seatFilling !== null && p !== undefined && p.isBot) this.#removePlayer(p.id);
+        // A broke human is only stood up, and keeps their real balance. If
+        // there is no chyakhe place for them and no idle bot to give one up,
+        // they leave the table instead; their balance is still untouched.
+        if (p !== undefined && ((this.#seatFilling !== null && p.isBot) || !this.#roomForOneMoreUnseated(true))) {
+          this.#removePlayer(p.id);
+        } else {
+          delete this.#seats[broke];
+        }
         continue;
       }
       if (live && this.#fillEmptySeats()) continue;
@@ -853,6 +879,24 @@ export class Table {
       seated = true;
     }
     return seated;
+  }
+
+  /**
+   * Whether one more player can be unseated without passing MAX_UNSEATED.
+   * If not, and `evictBot` is set, removes an unseated bot with no bet down
+   * (so with nothing at risk) to make room.
+   */
+  #roomForOneMoreUnseated(evictBot: boolean): boolean {
+    const seated = TURN_ORDER.filter((s) => this.#seats[s] !== undefined).length;
+    if (this.#players.size - seated < MAX_UNSEATED) return true;
+    if (!evictBot) return false;
+    for (const p of this.#players.values()) {
+      if (p.isBot && !p.leaving && this.seatOf(p.id) === null && !this.#bets.has(p.id)) {
+        this.#removePlayer(p.id);
+        return true;
+      }
+    }
+    return false;
   }
 
   /** Whether `playerId` could cover the worst case of sitting in `seat` now. */
