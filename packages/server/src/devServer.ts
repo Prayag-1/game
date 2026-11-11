@@ -1,20 +1,29 @@
 /**
- * DEVELOPER DEBUG SERVER. NO REAL AUTHENTICATION. NEVER EXPOSE IT TO A NETWORK.
+ * DEVELOPER SERVER. FOR YOUR OWN MACHINE ONLY. NEVER EXPOSE IT TO A NETWORK.
  *
- * Serves the debug client (debug-client/index.html) and the KaudaRoom on one
- * port, bound to 127.0.0.1 only. Identity is the dev stub: whoever presents a
- * token is that player. It is a tool for clicking through a real game on
- * your own machine, nothing more.
+ * Serves the debug client (debug-client/index.html), the session routes
+ * (auth/http.ts) and the KaudaRoom on one port, bound to 127.0.0.1 only.
+ * Identity is a real guest session (signed cookie, hashed id in the
+ * database), but this server runs over plain HTTP with Cloudflare's test
+ * Turnstile keys and a dev signing key, so it is a tool, not a service.
  *
- * Even so, a web page open in the same browser can try to reach a server on
- * localhost, so it is locked to its own origin:
+ * ONE ORIGIN, ON PURPOSE. The page, the session routes, the matchmaking
+ * routes and the WebSocket all live on http://127.0.0.1:<port>. The session
+ * cookie is SameSite=Lax and host-only, so a browser sends it with the
+ * WebSocket upgrade only because the upgrade goes to the same host as the
+ * page that holds it. Split them across ports or hosts and the room would
+ * see no cookie, and every join would be refused.
+ *
+ * Locked to its own origin, since a web page open in the same browser can
+ * still try to reach a server on localhost:
  * - the websocket upgrade is refused unless Origin is this server's own
  *   (SECURITY.md: "CSRF and cross-origin websockets"), including no Origin;
- * - matchmaking CORS answers only this server's own origin;
+ * - matchmaking CORS answers only this server's own origin, and the session
+ *   routes refuse state changes from any other Origin;
  * - pages are served only for a Host of 127.0.0.1 or localhost on this
  *   port, against DNS rebinding;
- * - the page has a strict Content-Security-Policy: scripts from this origin
- *   and the page's one inline script (by hash), nothing else.
+ * - the page has a strict Content-Security-Policy: scripts from this origin,
+ *   the page's one inline script (by hash) and Cloudflare's Turnstile.
  */
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
@@ -24,12 +33,20 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Server, matchMaker } from "@colyseus/core";
 import { WebSocketTransport } from "@colyseus/ws-transport";
-import { devIdentityStub } from "./identity.js";
+import { DEFAULT_HOUSE_RULES } from "@kauda/rules";
+import { mountSessionRoutes, sessionIdentity, type RouteApp } from "./auth/http.js";
+import { RateLimiter } from "./auth/rateLimit.js";
+import { Sessions } from "./auth/sessions.js";
+import type { TurnstileVerifier } from "./auth/turnstile.js";
+import type { DrizzleChipStore } from "./db/store.js";
 import { defineKaudaRoom, type KaudaRoomDeps } from "./room.js";
+import { defaultBotBuyIn } from "./table.js";
 
 /** The only address the dev server ever binds. */
 export const DEV_HOST = "127.0.0.1";
 export const DEFAULT_DEV_PORT = 3000;
+export const DEFAULT_GUESTS_PER_HOUR = 5;
+const TURNSTILE_ORIGIN = "https://challenges.cloudflare.com";
 
 const CLIENT_HTML = fileURLToPath(new URL("../debug-client/index.html", import.meta.url));
 const SDK_BUNDLE = join(dirname(createRequire(import.meta.url).resolve("@colyseus/sdk/package.json")), "dist", "colyseus.js");
@@ -37,12 +54,24 @@ const SDK_BUNDLE = join(dirname(createRequire(import.meta.url).resolve("@colyseu
 export interface DevServerOptions {
   /** 0 picks a free port. */
   readonly port?: number;
+  /** The database: chips, and the sessions table. */
+  readonly store: DrizzleChipStore;
+  readonly auth: {
+    /** Signs session cookies; at least 32 bytes. */
+    readonly secret: Buffer;
+    readonly turnstileSiteKey: string;
+    readonly turnstile: TurnstileVerifier;
+    /** Guest creations per IP per hour. */
+    readonly guestsPerHour?: number;
+    readonly now?: () => number;
+  };
   /** Overrides for the room, for tests. */
   readonly room?: Partial<KaudaRoomDeps>;
 }
 
 export interface DevServer {
   readonly server: Server;
+  readonly sessions: Sessions;
   readonly port: number;
   readonly url: string;
   close(): Promise<void>;
@@ -64,9 +93,10 @@ function inlineHash(html: string, tag: "script" | "style"): string {
 export function contentSecurityPolicy(html: string, port: number): string {
   return [
     "default-src 'none'",
-    `script-src 'self' ${inlineHash(html, "script")}`,
+    `script-src 'self' ${TURNSTILE_ORIGIN} ${inlineHash(html, "script")}`,
     `style-src ${inlineHash(html, "style")}`,
     `connect-src 'self' ws://${DEV_HOST}:${port} ws://localhost:${port}`,
+    `frame-src ${TURNSTILE_ORIGIN}`,
     "img-src 'none'",
     "base-uri 'none'",
     "form-action 'none'",
@@ -74,10 +104,20 @@ export function contentSecurityPolicy(html: string, port: number): string {
   ].join("; ");
 }
 
-export async function startDevServer(options: DevServerOptions = {}): Promise<DevServer> {
+export async function startDevServer(options: DevServerOptions): Promise<DevServer> {
   let port = -1; // known once listening
   const origins = (): readonly string[] => [`http://${DEV_HOST}:${port}`, `http://localhost:${port}`];
   const hosts = (): readonly string[] => [`${DEV_HOST}:${port}`, `localhost:${port}`];
+
+  // Plain HTTP on 127.0.0.1, so the cookie cannot be Secure here. Production
+  // serves over HTTPS with secure: true.
+  const sessions = new Sessions(options.store.db, {
+    secret: options.auth.secret,
+    secure: false,
+    ...(options.auth.now === undefined ? {} : { now: options.auth.now }),
+  });
+  const rules = options.room?.table?.rules ?? DEFAULT_HOUSE_RULES;
+  const buyIn = options.room?.table?.standardBuyIn ?? defaultBotBuyIn(rules);
 
   const transport = new WebSocketTransport({
     // Refuse any upgrade whose Origin is not this server, and one with none.
@@ -115,9 +155,18 @@ export async function startDevServer(options: DevServerOptions = {}): Promise<De
           })
           .send(readFileSync(SDK_BUNDLE, "utf8"));
       });
+      mountSessionRoutes(app as unknown as RouteApp, {
+        db: options.store.db,
+        sessions,
+        turnstile: options.auth.turnstile,
+        turnstileSiteKey: options.auth.turnstileSiteKey,
+        guestLimiter: new RateLimiter(options.auth.guestsPerHour ?? DEFAULT_GUESTS_PER_HOUR, 60 * 60 * 1000, options.auth.now),
+        buyIn,
+        allowedOrigins: origins,
+      });
     },
   });
-  server.define("kauda", defineKaudaRoom({ identity: devIdentityStub(), ...options.room }));
+  server.define("kauda", defineKaudaRoom({ identity: sessionIdentity(sessions), store: options.store, ...options.room }));
 
   // Matchmaking CORS: answer only our own origin. Anything else is told our
   // origin, which never matches, so the browser blocks it.
@@ -138,6 +187,7 @@ export async function startDevServer(options: DevServerOptions = {}): Promise<De
   port = (transport.server?.address() as AddressInfo).port;
   return {
     server,
+    sessions,
     port,
     url: `http://${DEV_HOST}:${port}/`,
     close: () => server.gracefullyShutdown(false),

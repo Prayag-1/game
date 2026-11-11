@@ -1,10 +1,14 @@
 import { createHash, randomBytes } from "node:crypto";
+import { sql } from "drizzle-orm";
 import { readFileSync } from "node:fs";
 import { request } from "node:http";
 import type { AddressInfo } from "node:net";
 import { fileURLToPath } from "node:url";
-import { JSDOM } from "jsdom";
+import * as jsdom from "jsdom";
+import { CookieJar, JSDOM } from "jsdom";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { openChipStore } from "../src/db/open.js";
+import type { DrizzleChipStore } from "../src/db/store.js";
 import { DEV_HOST, contentSecurityPolicy, startDevServer, type DevServer } from "../src/devServer.js";
 
 /**
@@ -13,11 +17,16 @@ import { DEV_HOST, contentSecurityPolicy, startDevServer, type DevServer } from 
  * settle in well under a second.
  */
 let dev: DevServer;
+let store: DrizzleChipStore;
 const HTML = readFileSync(fileURLToPath(new URL("../debug-client/index.html", import.meta.url)), "utf8");
 
 beforeAll(async () => {
+  store = await openChipStore({ dataDir: null });
   dev = await startDevServer({
     port: 0,
+    store,
+    // The page's Turnstile widget is stubbed below to produce "good-token".
+    auth: { secret: randomBytes(32), turnstileSiteKey: "test-site-key", turnstile: { verify: async (tok) => tok === "good-token" } },
     room: {
       tickMs: 20,
       table: { timings: { bettingMs: 400, throwingMs: 700, revealMs: 300, botThrowDelayMs: 60, botBetDelayMs: 60 } },
@@ -26,6 +35,7 @@ beforeAll(async () => {
 });
 afterAll(async () => {
   await dev.close();
+  await store.close();
 });
 
 const own = () => `http://${DEV_HOST}:${dev.port}`;
@@ -101,8 +111,9 @@ describe("dev server", () => {
     const inline = dom.window.document.querySelector("script:not([src])")?.textContent ?? "";
     const style = dom.window.document.querySelector("style")?.textContent ?? "";
     const b64 = (s: string) => createHash("sha256").update(s, "utf8").digest("base64");
-    expect(csp).toContain(`script-src 'self' 'sha256-${b64(inline)}'`);
+    expect(csp).toContain(`script-src 'self' https://challenges.cloudflare.com 'sha256-${b64(inline)}'`);
     expect(csp).toContain(`style-src 'sha256-${b64(style)}'`);
+    expect(csp).toContain("frame-src https://challenges.cloudflare.com");
     dom.window.close();
   });
 
@@ -151,17 +162,53 @@ describe("dev server", () => {
 describe("debug client page", () => {
   it("never parses server data as HTML", () => {
     expect(HTML).not.toMatch(/\.innerHTML|\.outerHTML|insertAdjacentHTML|document\.write|\beval\(|new Function/);
-    expect(HTML).toContain("NO REAL AUTHENTICATION");
+    expect(HTML).toContain("never expose it to");
+    // No token of its own: identity is the httpOnly session cookie.
+    expect(HTML).not.toMatch(/kauda\.dev\.token|getRandomValues/);
   });
 
-  /** Loads the real page from the dev server, as a browser would. */
-  async function openPage(storage: Record<string, string> = {}): Promise<JSDOM> {
+  /**
+   * Stands in for Cloudflare's Turnstile script, so the test never touches the
+   * network; everything else loads from the dev server as usual. The stub
+   * widget hands the page "good-token", as the real one does once a visitor
+   * passes the check. (jsdom 29's requestInterceptor postdates @types/jsdom.)
+   */
+  const TURNSTILE_STUB = `window.turnstile = {
+    render(el, opts) { setTimeout(() => opts.callback("good-token"), 10); return "w1"; },
+    reset() {},
+  };`;
+  const interceptor = (jsdom as unknown as {
+    requestInterceptor(fn: (request: Request) => Response | undefined): unknown;
+  }).requestInterceptor((request) =>
+    request.url.startsWith("https://challenges.cloudflare.com/")
+      ? new Response(TURNSTILE_STUB, { headers: { "Content-Type": "text/javascript" } })
+      : undefined,
+  );
+
+  /**
+   * Browsers send Origin on every POST, same-origin ones included (Fetch
+   * spec), and the server refuses a state change without it. jsdom's XHR
+   * leaves it out, so add it here, the way a browser would. The server stays
+   * strict; only the test's browser is made to behave like a real one.
+   */
+  type Dispatch = (opts: { method?: string; headers?: unknown }, handler: unknown) => boolean;
+  const browserOrigin = (dispatch: Dispatch): Dispatch => (opts, handler) => {
+    if (opts.method === "GET" || opts.method === "HEAD") return dispatch(opts, handler);
+    const headers = opts.headers;
+    const withOrigin = Array.isArray(headers)
+      ? [...(headers as string[]), "origin", own()]
+      : { ...(headers as Record<string, string> | undefined), origin: own() };
+    return dispatch({ ...opts, headers: withOrigin }, handler);
+  };
+
+  /** Loads the real page from the dev server, as a browser would, sharing a cookie jar. */
+  async function openPage(cookieJar: CookieJar): Promise<JSDOM> {
     const dom = await JSDOM.fromURL(own() + "/", {
       runScripts: "dangerously",
-      resources: "usable",
+      resources: { interceptors: [interceptor, browserOrigin] } as unknown as "usable",
+      cookieJar,
       pretendToBeVisual: true,
       beforeParse(window) {
-        for (const [k, v] of Object.entries(storage)) window.localStorage.setItem(k, v);
         // jsdom lacks these; a real browser on 127.0.0.1 has them.
         const w = window as unknown as Record<string, unknown> & { crypto: Crypto };
         if (w.crypto.subtle === undefined) Object.defineProperty(w.crypto, "subtle", { value: globalThis.crypto.subtle });
@@ -175,12 +222,25 @@ describe("debug client page", () => {
   const text = (dom: JSDOM, id: string) => dom.window.document.getElementById(id)?.textContent ?? "";
   const seatCard = (dom: JSDOM, i: number) => dom.window.document.querySelectorAll("#seats .seat")[i] as HTMLElement;
 
-  it("joins, shows bots, plays rounds, verifies every seed, sits, throws, and comes back after a refresh", async () => {
-    const dom = await openPage();
+  /** Signs up as a new guest on a page showing the sign-up form. */
+  async function signUp(dom: JSDOM, name: string): Promise<void> {
     const doc = dom.window.document;
-    (doc.getElementById("name") as HTMLInputElement).value = "हरि Test";
-    (doc.getElementById("join") as HTMLButtonElement).click();
+    const join = doc.getElementById("join") as HTMLButtonElement;
+    await until(() => doc.getElementById("join-panel")?.hidden === false, "the sign-up form");
+    await until(() => !join.disabled, "the Turnstile widget to pass");
+    (doc.getElementById("name") as HTMLInputElement).value = name;
+    join.click();
     await until(() => text(dom, "conn") === "connected", "the page to connect");
+  }
+
+  it("signs up, plays rounds, verifies every seed, sits, throws, comes back after a refresh, and logs out", async () => {
+    const jar = new CookieJar();
+    const dom = await openPage(jar);
+    const doc = dom.window.document;
+    await signUp(dom, "हरि Test");
+    // The session cookie is httpOnly: in the jar, invisible to the page.
+    expect(jar.getCookieStringSync(own())).toMatch(/kauda_session=/);
+    expect(doc.cookie).toBe("");
     await until(() => (seatCard(dom, 0).textContent ?? "").includes("bot"), "bots in the seats");
     expect(text(dom, "me-name")).toBe("हरि Test");
     expect(text(dom, "me-chips")).toBe("2000");
@@ -209,15 +269,11 @@ describe("debug client page", () => {
     throwBtn.click();
     await until(() => doc.querySelectorAll("#log li").length > before, "our throw to settle");
 
-    // Refresh: a new page with the same localStorage is the same player, same seat.
-    const storage: Record<string, string> = {};
-    for (const k of ["kauda.dev.token", "kauda.dev.roomId", "kauda.dev.joined", "kauda.dev.name"]) {
-      const v = dom.window.localStorage.getItem(k);
-      if (v !== null) storage[k] = v;
-    }
-    expect(storage["kauda.dev.token"]).toMatch(/^dev-[0-9a-f]{64}$/);
-    const again = await openPage(storage);
+    // Refresh: a new page with the same cookies is the same player, same seat,
+    // straight away and with no sign-up.
+    const again = await openPage(jar);
     await until(() => text(again, "conn") === "connected", "the refreshed page to reconnect");
+    expect(again.window.document.getElementById("join-panel")?.hidden).toBe(true);
     await until(() => (seatCard(again, 0).textContent ?? "").includes("you"), "the same seat after refresh");
     expect(text(again, "me-name")).toBe("हरि Test");
     // Two tabs are one player: the old page was replaced, and says so.
@@ -231,6 +287,20 @@ describe("debug client page", () => {
     (again.window.document.getElementById("reconnect") as HTMLButtonElement).click();
     await until(() => text(again, "conn") === "connected", "the reconnect");
     await until(() => (seatCard(again, 0).textContent ?? "").includes("you"), "the seat after reconnecting");
+
+    // Logout, then a new guest: a fresh account with a fresh buy-in.
+    (again.window.document.getElementById("logout") as HTMLButtonElement).click();
+    await until(() => again.window.document.getElementById("join-panel")?.hidden === false, "the sign-up form after logout");
+    expect(jar.getCookieStringSync(own())).not.toMatch(/kauda_session=/);
+    await signUp(again, "Sita New");
+    await until(() => text(again, "me-name") === "Sita New", "the new guest's name");
+    await until(() => text(again, "me-chips") === "2000", "the new guest's buy-in");
+    expect(text(again, "me-where")).toBe("chyakhe");
+    const named = ((await store.db.execute(
+      sql`SELECT display_name, balance FROM accounts WHERE display_name IN ('हरि Test', 'Sita New') ORDER BY display_name`,
+    )) as unknown as { rows: { display_name: string; balance: string | number }[] }).rows;
+    expect(named.map((r) => r.display_name).sort()).toEqual(["Sita New", "हरि Test"]); // two accounts
+    expect(Number(named.find((r) => r.display_name === "Sita New")?.balance)).toBe(2000);
 
     dom.window.close();
     again.window.close();

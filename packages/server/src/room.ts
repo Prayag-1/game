@@ -1,4 +1,4 @@
-import { CloseCode, ErrorCode, Room, ServerError, type Client } from "@colyseus/core";
+import { CloseCode, ErrorCode, Room, ServerError, type AuthContext, type Client } from "@colyseus/core";
 import { isValidPlayerId, parseCommand } from "./commands.js";
 import { TablePersistence } from "./db/persistence.js";
 import type { ChipStore } from "./db/store.js";
@@ -218,11 +218,15 @@ export class KaudaRoom extends Room {
     this.setSimulationInterval(() => this.#step(), deps.tickMs ?? DEFAULT_TICK_MS);
   }
 
-  override async onAuth(_client: Client, options: unknown): Promise<Identity> {
+  /**
+   * Runs on the WebSocket upgrade. Identity comes only from that request
+   * (the session cookie rides along because the page and the socket share
+   * one origin); the client's join options are never read.
+   */
+  override async onAuth(_client: Client, _options: unknown, context: AuthContext): Promise<Identity> {
     const deps = this.deps;
     if (deps === undefined) throw new ServerError(ErrorCode.AUTH_FAILED, "room not configured");
-    const given = options !== null && typeof options === "object" ? (options as { token?: unknown; name?: unknown }) : {};
-    const identity = await deps.identity.resolveIdentity(given.token, { name: given.name });
+    const identity = await deps.identity.resolveIdentity({ headers: context.headers, ip: context.ip });
     if (identity === null || !isValidPlayerId(identity.playerId) || identity.playerId === MINT_ACCOUNT) {
       throw new ServerError(ErrorCode.AUTH_FAILED, "unknown identity");
     }

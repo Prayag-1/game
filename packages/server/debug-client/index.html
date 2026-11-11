@@ -1,9 +1,12 @@
 <!doctype html>
 <!--
-  KAUDA DEVELOPER DEBUG CLIENT.
-  NO REAL AUTHENTICATION: the player is whoever holds the random token kept in
-  this browser's localStorage. It must never be exposed to a network. It is
-  served only by the dev server on 127.0.0.1 (pnpm dev).
+  KAUDA DEVELOPER DEBUG CLIENT. FOR YOUR OWN MACHINE ONLY: never expose it to
+  a network. Served only by the dev server on 127.0.0.1 (pnpm dev), over plain
+  HTTP, with Cloudflare's test Turnstile keys.
+
+  Identity is a guest session: an httpOnly cookie this page cannot read, set
+  by POST /session/guest. The page never holds a token of its own. A guest
+  has no password, so clearing this browser's cookies loses the account.
 
   Rules for this file: anything that came from the server reaches the page
   through textContent or a text node, never through HTML parsing. No
@@ -67,17 +70,19 @@
 <header>
   <h1>Kauda debug client</h1>
   <span class="pill" id="conn">idle</span>
-  <span class="dev-warning">DEV ONLY · no real authentication · never expose to a network</span>
+  <span class="dev-warning">DEV ONLY · plain HTTP on 127.0.0.1 · never expose to a network</span>
 </header>
 <div id="banner" hidden></div>
 <main>
-  <section id="join-panel">
-    <h2>Join</h2>
+  <section id="join-panel" hidden>
+    <h2>Play as a guest</h2>
     <div class="row">
       <label>Name <input id="name" maxlength="20" autocomplete="off" placeholder="3–20 letters"></label>
-      <button id="join" class="primary">Join</button>
-      <span class="muted">The name is used the first time this browser's token is seen.</span>
+      <div id="turnstile"></div>
+      <button id="join" class="primary" disabled>Create guest and join</button>
     </div>
+    <div id="signup-error" class="bad"></div>
+    <div class="muted">No password: this browser's cookie is the account. Clear your cookies and it is gone.</div>
   </section>
 
   <section id="table-panel" hidden>
@@ -101,6 +106,7 @@
       <button id="drop" title="Close the socket uncleanly and hold off reconnecting, to test the disconnect rules">Simulate drop</button>
       <button id="reconnect" hidden>Reconnect</button>
       <button id="leave" title="Leave the table on purpose: no reconnect window">Leave</button>
+      <button id="logout" title="End this guest session. A new guest is a new account.">Logout</button>
     </div>
     <div id="error"></div>
   </section>
@@ -129,6 +135,7 @@
 </main>
 
 <script src="/vendor/colyseus.js"></script>
+<script src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit" async defer></script>
 <script>
 "use strict";
 (() => {
@@ -144,7 +151,15 @@
   const MISS = "ति-र्यो";
   const REPLACED_CLOSE_CODE = 4100;
   const CONSENTED_CLOSE_CODE = 4000;
-  const KEY = { token: "kauda.dev.token", name: "kauda.dev.name", room: "kauda.dev.roomId", joined: "kauda.dev.joined" };
+  // Only a convenience: which room to rejoin. Identity is the session cookie.
+  const KEY = { room: "kauda.dev.roomId" };
+  const PANELS = ["table-panel", "seats-panel", "throw-panel", "fair-panel", "log-panel"];
+  const SIGNUP_ERRORS = {
+    "bad-name": "That name is not allowed: 3 to 20 letters (Latin or Devanagari), digits, spaces, _ or -.",
+    "turnstile-failed": "The human check failed. Try again.",
+    "too-many-guests": "Too many new guests from this address. Try again later.",
+    malformed: "Something went wrong with the request.",
+  };
   const LOG_LIMIT = 200;
 
   // ------------------------------------------------------------ helpers
@@ -163,14 +178,32 @@
   }
   function setText(id, text) { $(id).textContent = text; }
 
-  /** This browser's dev token: 32 random bytes, made once and kept. */
-  function token() {
-    let t = load(KEY.token);
-    if (t === null || !/^dev-[0-9a-f]{64}$/.test(t)) {
-      t = "dev-" + hex(crypto.getRandomValues(new Uint8Array(32)));
-      save(KEY.token, t);
-    }
-    return t;
+  /** A same-origin JSON request; the session cookie rides along. Never throws. */
+  function api(method, path, body) {
+    return new Promise((resolve) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open(method, path);
+      if (body !== undefined) xhr.setRequestHeader("Content-Type", "application/json");
+      xhr.onload = () => {
+        let json = null;
+        try { json = JSON.parse(xhr.responseText); } catch { /* 204, or not JSON */ }
+        resolve({ status: xhr.status, json });
+      };
+      xhr.onerror = () => resolve({ status: 0, json: null });
+      xhr.send(body === undefined ? null : JSON.stringify(body));
+    });
+  }
+
+  function waitFor(check, ms) {
+    return new Promise((resolve, reject) => {
+      const end = Date.now() + ms;
+      const poll = () => {
+        if (check()) return resolve();
+        if (Date.now() > end) return reject(new Error("timed out"));
+        setTimeout(poll, 50);
+      };
+      poll();
+    });
   }
 
   async function sha256Hex(bytes) {
@@ -200,6 +233,8 @@
     verified: new Map(), // roundId -> Promise<{ hash, published, faces }>
     errorTimer: null,
     logged: 0,
+    widget: null,        // the Turnstile widget id
+    turnstileToken: null,
   };
 
   const myId = () => state.me?.playerId ?? null;
@@ -232,7 +267,9 @@
     state.replaced = false;
     if (state.conn !== "reconnecting") setConn("connecting");
     state.client ??= new Colyseus.Client(location.origin);
-    const options = { token: token(), name: $("name").value };
+    // No token and no name: who we are comes from the session cookie on the
+    // WebSocket upgrade, which the server reads itself.
+    const options = {};
     let room = null;
     const last = load(KEY.room);
     // The same room first, so a refresh lands back in the same seat.
@@ -245,8 +282,8 @@
 
   function attach(room) {
     state.room = room;
-    // The server resumes a player by token, not by Colyseus reconnection
-    // tokens, so the SDK's own reconnect loop is off and ours is below.
+    // The server resumes a player by their session, not by Colyseus
+    // reconnection tokens, so the SDK's own reconnect loop is off; ours is below.
     if (room.reconnection) room.reconnection.enabled = false;
     room.onMessage("welcome", (m) => { state.me = m; render(); });
     room.onMessage("view", (v) => onView(v));
@@ -260,12 +297,79 @@
     room.onLeave((code) => onLeave(room, code));
     room.send("sync");
     save(KEY.room, room.roomId);
-    save(KEY.joined, "1");
-    save(KEY.name, $("name").value);
     state.retry = 0;
     setConn("connected");
     $("join-panel").hidden = true;
-    for (const id of ["table-panel", "seats-panel", "throw-panel", "fair-panel", "log-panel"]) $(id).hidden = false;
+    for (const id of PANELS) $(id).hidden = false;
+  }
+
+  // ------------------------------------------------------------ session
+  /** On load: with a session, play straight away; without one, sign up. */
+  async function boot() {
+    const me = await api("GET", "/session/me");
+    if (me.status === 200) join();
+    else showSignup();
+  }
+
+  function join() {
+    connect().catch((e) => {
+      const message = String(e && e.message ? e.message : e);
+      // No valid session (expired, revoked): back to signing up.
+      if (/identity/i.test(message)) return void showSignup();
+      setConn("disconnected", "Could not join: " + message);
+    });
+  }
+
+  async function showSignup() {
+    $("join-panel").hidden = false;
+    for (const id of PANELS) $(id).hidden = true;
+    $("join").disabled = true;
+    state.turnstileToken = null;
+    const config = await api("GET", "/session/config");
+    try {
+      await waitFor(() => window.turnstile !== undefined, 15000);
+    } catch {
+      setText("signup-error", "The human check did not load. Check your connection and reload.");
+      return;
+    }
+    if (state.widget !== null) {
+      window.turnstile.reset(state.widget);
+      return;
+    }
+    state.widget = window.turnstile.render($("turnstile"), {
+      sitekey: config.json && config.json.turnstileSiteKey,
+      callback: (t) => { state.turnstileToken = t; $("join").disabled = false; },
+      "expired-callback": () => { state.turnstileToken = null; $("join").disabled = true; },
+      "error-callback": () => { state.turnstileToken = null; $("join").disabled = true; },
+    });
+  }
+
+  async function createGuest() {
+    $("join").disabled = true;
+    setText("signup-error", "");
+    const res = await api("POST", "/session/guest", { name: $("name").value, turnstileToken: state.turnstileToken ?? "" });
+    if (res.status === 201) return void join();
+    const code = res.json && res.json.error;
+    setText("signup-error", SIGNUP_ERRORS[code] ?? `Could not create a guest (${res.status}).`);
+    // A Turnstile token is good once: get a fresh one before trying again.
+    state.turnstileToken = null;
+    if (state.widget !== null) window.turnstile.reset(state.widget);
+  }
+
+  async function logout() {
+    forget(KEY.room);
+    const room = state.room;
+    state.room = null; // so its leave is not treated as a drop
+    if (room) await room.leave(true); // off the table on purpose first
+    await api("POST", "/session/logout", {});
+    state.me = null;
+    state.view = null;
+    state.logged = 0;
+    state.verified.clear();
+    state.published.clear();
+    $("log").replaceChildren();
+    setConn("idle", "Logged out. A new guest is a new account, with a fresh buy-in.");
+    showSignup();
   }
 
   function onLeave(room, code) {
@@ -537,14 +641,8 @@
   // ------------------------------------------------------------ wiring
   buildSeats();
   buildShells();
-  $("name").value = load(KEY.name) ?? "";
-  $("join").addEventListener("click", () => {
-    $("join").disabled = true;
-    connect().catch((e) => {
-      $("join").disabled = false;
-      setConn("disconnected", "Could not join: " + String(e && e.message ? e.message : e));
-    });
-  });
+  $("join").addEventListener("click", () => void createGuest());
+  $("logout").addEventListener("click", () => void logout());
   $("throw").addEventListener("click", () => send({ type: "throw" }));
   $("stand").addEventListener("click", () => send({ type: "stand" }));
   $("clear-bet").addEventListener("click", () => send({ type: "clearBet" }));
@@ -560,15 +658,14 @@
     connect().catch(() => scheduleReconnect());
   });
   $("leave").addEventListener("click", () => {
-    forget(KEY.joined);
     forget(KEY.room);
     if (state.room) state.room.leave(true);
   });
   setInterval(renderClock, 100);
   setConn("idle");
 
-  // A refresh brings a player who had joined straight back: same token, same room.
-  if (load(KEY.joined) === "1") $("join").click();
+  // A refresh brings a player with a session straight back: same cookie, same room.
+  void boot();
 })();
 </script>
 </body>

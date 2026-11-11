@@ -51,10 +51,16 @@ commit-reveal check in the browser, and a "Simulate drop" button for the
 disconnect rules. Killing wifi will not drop the connection, because the page
 and the server talk over 127.0.0.1; use "Simulate drop", or close the tab.
 
-> **No real authentication. Never expose it to a network.** The player is
-> whoever holds the random token in the browser's localStorage, and the
-> server takes any token it is given. The dev server binds 127.0.0.1 only and
-> refuses other origins and hosts, but it is a developer tool, not a service.
+You sign up as a guest: a name and a Cloudflare Turnstile check (test keys in
+development, so it always passes), which creates an account with the standard
+buy-in and a session cookie. A refresh brings you back as the same player;
+Logout and a new guest give a fresh account. A guest has no password, so
+clearing the browser's cookies loses the account.
+
+> **For your own machine only. Never expose it to a network.** It runs over
+> plain HTTP on 127.0.0.1, with a development signing key and Turnstile test
+> keys. The session design itself is described in `SECURITY.md`, "Identity:
+> guest sessions".
 
 ## Chips
 

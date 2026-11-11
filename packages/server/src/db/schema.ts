@@ -115,3 +115,28 @@ export const ledgerEntries = pgTable(
     index("ledger_account_reason").on(t.accountId, t.reason, t.createdAt),
   ],
 );
+
+/**
+ * Login sessions. The id is sha256 of the 32 random bytes in the cookie, as
+ * hex: the raw id is never stored, so a leak of this table hands out no live
+ * sessions. Not append-only: last_seen_at and expires_at slide, and
+ * revoked_at is set on logout.
+ */
+export const sessions = pgTable(
+  "sessions",
+  {
+    id: text("id").primaryKey(),
+    accountId: text("account_id")
+      .notNull()
+      .references(() => accounts.id),
+    createdAt: createdAt(),
+    lastSeenAt: timestamp("last_seen_at", { withTimezone: true, mode: "date" }).notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true, mode: "date" }).notNull(),
+    revokedAt: timestamp("revoked_at", { withTimezone: true, mode: "date" }),
+  },
+  (t) => [
+    check("sessions_id_is_a_sha256", sql`${t.id} ~ '^[0-9a-f]{64}$'`),
+    check("sessions_expire_after_creation", sql`${t.expiresAt} > ${t.createdAt}`),
+    index("sessions_account").on(t.accountId),
+  ],
+);

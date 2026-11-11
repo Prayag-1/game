@@ -13,6 +13,7 @@ export default defineConfig({
     poolMatchGlobs: [
       ["**/test/room.test.ts", "threads"],
       ["**/test/devserver.test.ts", "threads"],
+      ["**/test/auth.test.ts", "threads"],
     ],
   },
 });

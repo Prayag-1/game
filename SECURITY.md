@@ -24,7 +24,9 @@ first and give the reason.
    entries and is never overwritten. Corrections are new entries, never edits.
 5. **A username is not an identity.** Identity is a signed, `httpOnly`,
    `Secure`, `SameSite=Lax` cookie holding a 256-bit random session id. The
-   session itself is stored on the server.
+   session itself is stored on the server. (Built: see "Identity: guest
+   sessions". `Secure` is set in production; the dev server is plain HTTP on
+   127.0.0.1.)
 6. **No user text is ever rendered as HTML.** No `innerHTML`, no
    `dangerouslySetInnerHTML`, no `document.write`, for any value a user
    created or could influence.
@@ -373,13 +375,74 @@ browser lets through with the victim's cookie.
   On its own it is not enough.
 - No GET request changes state.
 - Every state-changing HTTP request must carry an `Origin` header on the
-  allowlist, and a CSRF token tied to the session.
+  allowlist and a JSON body, or it is refused (built, for the session
+  routes). A JSON body means a cross-site form cannot post, and a
+  cross-origin fetch needs a preflight that CORS refuses. Still to do: a
+  CSRF token tied to the session, once there are routes that act on a
+  logged-in account's behalf beyond logging out.
 - **Websockets are not covered by CORS or by SameSite in every browser.** The
   server checks `Origin` on every websocket upgrade against an exact
   allowlist and refuses anything else, including no `Origin` at all. The
-  session is checked on upgrade as well, not just on the first message.
+  session is checked on upgrade as well, not just on the first message
+  (built).
 - The session id is stored server-side as its hash, so a database leak does
-  not hand out live sessions. Sessions are rotated on login and expire.
+  not hand out live sessions (built). Sessions expire; see the next section.
+
+### Identity: guest sessions
+
+This is built, not planned (`packages/server/src/auth/`).
+
+- **A session id** is 32 bytes from `crypto.randomBytes`. The cookie holds it
+  with an HMAC-SHA256 signature, `<id>.<signature>`, both base64url. The
+  `sessions` table stores only `sha256(id)`, with `account_id`,
+  `created_at`, `last_seen_at`, `expires_at` and `revoked_at`.
+- **The signing key** comes from `KAUDA_SESSION_SECRET` (at least 32 bytes,
+  as hex), never committed. The server refuses to start in production
+  without it. In development only, a random key is kept in `.data/`
+  (gitignored). Changing the key logs everyone out.
+- **The cookie** is `httpOnly`, `SameSite=Lax` and `Path=/`. In production it
+  is also `Secure` and named with the `__Host-` prefix, which pins it to the
+  exact host over HTTPS. Page scripts cannot read it.
+- **Checks.** The signature and the session hash are compared in constant
+  time. A cookie is refused if its signature is wrong, or if the session is
+  unknown, revoked or expired.
+- **Expiry slides:** 90 days from last use. A guest has no password and no
+  other way in, so losing the cookie loses the account. Linking a real login
+  method (an `auth_methods` table) is a later phase.
+- **No session id is ever logged.** A test captures every log line through a
+  whole flow and checks that the id appears in none of them.
+- **Creating a guest** is `POST /session/guest` with `{ name, turnstileToken }`.
+  - The Turnstile token is verified server-side with Cloudflare's siteverify.
+    Any failure counts as a refusal.
+  - The name must pass the username rules in "XSS via usernames and chat",
+    or it is refused; it is never silently renamed.
+  - It is rate-limited per IP: 5 per hour by default.
+  - In one transaction it creates a human account, its standard buy-in from
+    the mint, and the session.
+  - Development uses Cloudflare's always-pass test keys; production must set
+    `TURNSTILE_SITE_KEY` and `TURNSTILE_SECRET_KEY`.
+- **Other routes:** `POST /session/logout` revokes the session and clears the
+  cookie. `GET /session/me` returns the account or 401.
+- **Joining a room.** The room resolves identity only from the session cookie
+  on the WebSocket upgrade. A join with no valid session is refused, and
+  nothing the client puts in its join options is read. The same account
+  connecting twice replaces the first connection.
+- **One origin.** The page, the session routes and the WebSocket share one
+  origin, which is why the cookie reaches the upgrade. Production must keep
+  them on one origin too, or move to an explicit token handshake.
+
+Known gaps, to close before this faces the internet:
+
+- **Rate limits** live in memory, so they are per process; more than one
+  process needs them in Redis.
+- **Client IP behind a proxy.** The rate limit uses the socket's peer
+  address. Behind a proxy it must read the proxy's own header, and only
+  that. Colyseus itself trusts `X-Forwarded-For` for `AuthContext.ip`, which
+  any client can forge, so that value is a hint, never a key for a limit.
+- **Logout and live connections.** Logging out does not yet close the
+  account's open connections. They end at their next reconnect.
+- **Revoking every session** of an account (say, "log out everywhere") is
+  not built yet.
 
 ### Denial of service
 

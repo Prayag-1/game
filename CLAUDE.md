@@ -94,6 +94,7 @@ A player who actually plays should confirm them.
 - The server is the only authority on a throw. The client never rolls.
 - Strict TypeScript, including `noUncheckedIndexedAccess`.
 - Run `pnpm test` before every commit.
+- Later phase, not built: an `auth_methods` table to link a Google or phone login to a guest account (today a guest is only its session cookie).
 
 ## Build order
 

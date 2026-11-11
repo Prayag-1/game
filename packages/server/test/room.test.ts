@@ -1,8 +1,8 @@
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { Server } from "@colyseus/core";
 import { boot, type ColyseusTestServer } from "@colyseus/testing";
-import type { Room as SDKRoom } from "@colyseus/sdk";
+import { Client as SDKClient, type Room as SDKRoom } from "@colyseus/sdk";
 import { WebSocketTransport } from "@colyseus/ws-transport";
 import type { SeatId } from "@kauda/rules";
 import {
@@ -11,13 +11,15 @@ import {
   REPLACED_CLOSE_CODE,
   commitmentFromSeed,
   defineKaudaRoom,
-  devIdentityStub,
   seedForFaceCount,
   type Commitment,
   type RoundRecord,
   type TableView,
 } from "../src/index.js";
+import { sessionIdentity } from "../src/auth/http.js";
+import { Sessions } from "../src/auth/sessions.js";
 import { openChipStore } from "../src/db/open.js";
+import type { IdentityResolver } from "../src/identity.js";
 import type { ChipStore, DrizzleChipStore } from "../src/db/store.js";
 import { lcg } from "./harness.js";
 
@@ -40,8 +42,32 @@ const queue = (...faceUps: number[]): void => {
   for (const k of faceUps) scripted.push(seedForFaceCount(k, n++));
 };
 
+/**
+ * Identity is a real guest session in this file's database. The rooms are
+ * defined before that database exists, so the resolver looks it up late.
+ */
+let sessions: Sessions;
+const identity: IdentityResolver = {
+  resolveIdentity: (request) => sessionIdentity(sessions).resolveIdentity(request),
+};
+/** One guest session per label, made on first use; the cookie to send. */
+const cookies = new Map<string, string>();
+async function cookieFor(label: string): Promise<string> {
+  let cookie = cookies.get(label);
+  if (cookie === undefined) {
+    const guest = await sessions.createGuest(label, 2_000);
+    cookie = guest.setCookie.split(";")[0] ?? "";
+    cookies.set(label, cookie);
+  }
+  return cookie;
+}
+/** An SDK client that presents this label's session cookie, as a browser would. */
+async function clientFor(label: string): Promise<SDKClient> {
+  return new SDKClient("http://localhost:2568", { headers: { Cookie: await cookieFor(label) } });
+}
+
 const KaudaTestRoom = defineKaudaRoom({
-  identity: devIdentityStub(),
+  identity,
   now: () => t,
   commitments,
   botRandom: lcg(11),
@@ -75,13 +101,14 @@ const failing: ChipStore = {
 
 beforeAll(async () => {
   store = await openChipStore({ dataDir: null });
+  sessions = new Sessions(store.db, { secret: randomBytes(32), secure: false });
   // A Server instance rather than a @colyseus/tools config: tools' listen()
   // calls process.send("ready"), which breaks vitest's worker IPC channel.
   const server = new Server({ transport: new WebSocketTransport(), greet: false });
   server.define("kauda", KaudaTestRoom);
   server.define(
     "kauda-db",
-    defineKaudaRoom({ identity: devIdentityStub(), now: () => t, commitments, botRandom: lcg(13), tickMs: 5, store: failing }),
+    defineKaudaRoom({ identity, now: () => t, commitments, botRandom: lcg(13), tickMs: 5, store: failing }),
   );
   colyseus = await boot(server);
 });
@@ -162,8 +189,9 @@ interface Conn {
   view(): TableView;
 }
 
+/** Joins the current room as the guest behind this label: its session cookie, no token. */
 async function connect(token: string): Promise<Conn> {
-  const sdk = await colyseus.sdk.joinById(room.roomId, { token });
+  const sdk = await (await clientFor(token)).joinById(room.roomId, {});
   // This test drops connections on purpose; the SDK must not reconnect by itself.
   sdk.reconnection.enabled = false;
   const c: Conn = {
@@ -354,7 +382,7 @@ describe("KaudaRoom", () => {
     expect(room.table.records().at(-1)?.occupants.teeya).toBe(a.playerId);
   });
 
-  it("replaces the first connection when the same token connects again", async () => {
+  it("replaces the first connection when the same session connects again", async () => {
     const first = await connect("token-alice");
     const second = await connect("token-alice");
     expect(second.playerId).toBe(first.playerId);
@@ -387,7 +415,7 @@ describe("KaudaRoom", () => {
     expect(Object.values(room.table.view().seats).every((p) => p !== null && !p.isBot)).toBe(true);
     for (let i = 0; i < 8; i += 1) await connect(`token-u${i}`);
     expect(room.clients).toHaveLength(12);
-    await expect(colyseus.sdk.joinById(room.roomId, { token: "token-thirteenth" })).rejects.toThrow();
+    await expect((await clientFor("token-thirteenth")).joinById(room.roomId, {})).rejects.toThrow();
     expect(room.clients).toHaveLength(12);
   });
 });
@@ -442,7 +470,7 @@ describe("KaudaRoom with a database", () => {
     const report = await store.verify();
     expect(report.ok).toBe(true);
     // Nobody can join a paused table.
-    await expect(colyseus.sdk.joinById(room.roomId, { token: "token-db-late" })).rejects.toThrow();
+    await expect((await clientFor("token-db-late")).joinById(room.roomId, {})).rejects.toThrow();
   });
 
   it("keeps a player at one table at a time, so only one room ever writes their chips", async () => {
@@ -451,7 +479,7 @@ describe("KaudaRoom with a database", () => {
     const a = await connect("token-db-chet");
     await dbRoom();
     const second: KaudaRoom = room;
-    await expect(colyseus.sdk.joinById(second.roomId, { token: "token-db-chet" })).rejects.toThrow(/at-another-table/);
+    await expect((await clientFor("token-db-chet")).joinById(second.roomId, {})).rejects.toThrow(/at-another-table/);
     await a.sdk.leave(true);
     await until(() => !first.table.hasPlayer(a.playerId), "A to leave the first table");
     // Off the first table, A may sit down at another. (The refused join left
