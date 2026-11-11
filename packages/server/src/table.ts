@@ -365,6 +365,11 @@ export class Table {
     return TURN_ORDER.find((s) => this.#seats[s] === playerId) ?? null;
   }
 
+  /** Whether this player is at the table at all, including one leaving after the round. */
+  hasPlayer(playerId: string): boolean {
+    return this.#players.has(playerId);
+  }
+
   view(): TableView {
     const playerView = (id: string): PlayerView | null => {
       const p = this.#players.get(id);
@@ -918,7 +923,7 @@ export class Table {
    * nothing at risk, so the whole balance is free to move.
    */
   #removePlayer(playerId: string): void {
-    if (this.#players.get(playerId)?.isBot) this.ledger.retire(playerId, "botCashout", this.#now());
+    if (this.#players.get(playerId)?.isBot) this.ledger.retire(playerId, "botResidual", this.#now());
     const seat = this.seatOf(playerId);
     if (seat !== null) delete this.#seats[seat];
     this.#bets.delete(playerId);

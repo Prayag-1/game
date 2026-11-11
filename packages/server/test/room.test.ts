@@ -17,6 +17,8 @@ import {
   type RoundRecord,
   type TableView,
 } from "../src/index.js";
+import { openChipStore } from "../src/db/open.js";
+import type { ChipStore, DrizzleChipStore } from "../src/db/store.js";
 import { lcg } from "./harness.js";
 
 /**
@@ -49,15 +51,43 @@ const KaudaTestRoom = defineKaudaRoom({
 let colyseus: ColyseusTestServer;
 let room: KaudaRoom;
 
+/** A fresh in-memory PGlite for this file, behind a switch that makes the next round's write fail. */
+let store: DrizzleChipStore;
+let failNextRound = false;
+const failing: ChipStore = {
+  get description() {
+    return store.description;
+  },
+  openAccount: (i) => store.openAccount(i),
+  balanceOf: (id) => store.balanceOf(id),
+  lastEntryAt: (id, r) => store.lastEntryAt(id, r),
+  transfer: (tr) => store.transfer(tr),
+  settleRound: async (tableId, r) => {
+    if (failNextRound) {
+      failNextRound = false;
+      throw new Error("simulated database failure");
+    }
+    return store.settleRound(tableId, r);
+  },
+  verify: () => store.verify(),
+  close: async () => {},
+};
+
 beforeAll(async () => {
+  store = await openChipStore({ dataDir: null });
   // A Server instance rather than a @colyseus/tools config: tools' listen()
   // calls process.send("ready"), which breaks vitest's worker IPC channel.
   const server = new Server({ transport: new WebSocketTransport(), greet: false });
   server.define("kauda", KaudaTestRoom);
+  server.define(
+    "kauda-db",
+    defineKaudaRoom({ identity: devIdentityStub(), now: () => t, commitments, botRandom: lcg(13), tickMs: 5, store: failing }),
+  );
   colyseus = await boot(server);
 });
 afterAll(async () => {
   await colyseus.shutdown();
+  await store.close();
 });
 beforeEach(async () => {
   scripted = [];
@@ -82,8 +112,13 @@ async function until(pred: () => boolean, what: string, ms = 3_000): Promise<voi
 /** Moves the fake clock and lets the room run one simulation step. */
 async function advance(ms: number): Promise<void> {
   t += ms;
-  await room.waitForNextTimestep();
-  await room.waitForNextTimestep();
+  await nextStep();
+  await nextStep();
+}
+
+/** The room's next simulation step, or a short wait if it has none (a paused room stops its loop). */
+function nextStep(): Promise<void> {
+  return Promise.race([room.waitForNextTimestep(), sleep(250)]).then(() => undefined);
 }
 
 /**
@@ -123,6 +158,7 @@ interface Conn {
   playerId: string;
   closedWith: number | null;
   replaced: boolean;
+  paused: string | null;
   view(): TableView;
 }
 
@@ -138,6 +174,7 @@ async function connect(token: string): Promise<Conn> {
     playerId: "",
     closedWith: null,
     replaced: false,
+    paused: null,
     view() {
       const v = this.views.at(-1);
       if (v === undefined) throw new Error("no view yet");
@@ -150,6 +187,7 @@ async function connect(token: string): Promise<Conn> {
   sdk.onMessage("round", (r: RoundRecord) => c.rounds.push(r));
   sdk.onMessage("replaced", () => (c.replaced = true));
   sdk.onMessage("topUp", () => {});
+  sdk.onMessage("paused", (m: { reason: string }) => (c.paused = m.reason));
   sdk.onLeave((code: number) => (c.closedWith = code));
   sdk.send("sync");
   await until(() => c.playerId !== "" && c.views.length > 0, `${token} to sync`);
@@ -351,5 +389,75 @@ describe("KaudaRoom", () => {
     expect(room.clients).toHaveLength(12);
     await expect(colyseus.sdk.joinById(room.roomId, { token: "token-thirteenth" })).rejects.toThrow();
     expect(room.clients).toHaveLength(12);
+  });
+});
+
+describe("KaudaRoom with a database", () => {
+  async function dbRoom(): Promise<void> {
+    room = (await colyseus.createRoom("kauda-db", {})) as unknown as KaudaRoom;
+  }
+
+  it("keeps a player's chips across a restart of the table", async () => {
+    await dbRoom();
+    const a = await seatedOnTeeya("token-db-asha");
+    await settleRounds(3);
+    await room.persistence?.idle();
+    const chips = room.table.balance(a.playerId);
+    expect(chips).not.toBe(room.table.standardBuyIn); // A really played
+    expect(await store.balanceOf(a.playerId)).toBe(chips);
+    await toPhase("revealing"); // between rounds, so leaving moves no chips
+    await a.sdk.leave(true);
+    await until(() => room.clients.length === 0, "A to leave");
+
+    // A new table, empty memory: the chips come back from the database.
+    await dbRoom();
+    expect(room.table.balance(a.playerId)).toBe(0);
+    const again = await connect("token-db-asha");
+    expect(again.playerId).toBe(a.playerId);
+    await until(() => again.view().chyakhe.some((p) => p.playerId === a.playerId), "A at the new table");
+    expect(again.view().chyakhe.find((p) => p.playerId === a.playerId)?.chips).toBe(chips);
+    expect((await store.verify()).ok).toBe(true);
+  });
+
+  it("pauses the table for good when a write fails, and says so", async () => {
+    await dbRoom();
+    const a = await connect("token-db-bina");
+    await advance(0);
+    const persisted = room.table.roundCount;
+    failNextRound = true;
+    for (let i = 0; i < 60 && room.paused === null; i += 1) await toPhaseEnd();
+    expect(room.paused).toMatch(/write to the database failed/);
+    await until(() => a.paused !== null, "the client to hear about it");
+    // Nothing continues: commands are refused, and time moves nothing.
+    send(a, { type: "sit", seat: "teeya" });
+    await until(() => a.errors.includes("table-paused"), "the refusal");
+    const rounds = room.table.roundCount;
+    // A paused room has stopped its loop, so there is no next step to wait
+    // for: move the clock, give it real time, and see that nothing happened.
+    t += 120_000;
+    await sleep(200);
+    expect(room.table.roundCount).toBe(rounds);
+    // The database has every round before the failure, and not the failed one.
+    expect(rounds).toBe(persisted + 1);
+    const report = await store.verify();
+    expect(report.ok).toBe(true);
+    // Nobody can join a paused table.
+    await expect(colyseus.sdk.joinById(room.roomId, { token: "token-db-late" })).rejects.toThrow();
+  });
+
+  it("keeps a player at one table at a time, so only one room ever writes their chips", async () => {
+    await dbRoom();
+    const first = room;
+    const a = await connect("token-db-chet");
+    await dbRoom();
+    const second: KaudaRoom = room;
+    await expect(colyseus.sdk.joinById(second.roomId, { token: "token-db-chet" })).rejects.toThrow(/at-another-table/);
+    await a.sdk.leave(true);
+    await until(() => !first.table.hasPlayer(a.playerId), "A to leave the first table");
+    // Off the first table, A may sit down at another. (The refused join left
+    // the second room empty, so Colyseus has disposed of it: use a new one.)
+    await dbRoom();
+    const again = await connect("token-db-chet");
+    expect(again.playerId).toBe(a.playerId);
   });
 });

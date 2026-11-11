@@ -91,7 +91,7 @@ zero, so chips are only ever moved, never created or destroyed in place.
 | `buyin` | mint -> human | A human buys in |
 | `botBuyin` | mint -> bot | A bot joins, or seat filling seats a fresh bot |
 | `topup` | mint -> human | A broke human claims a free top-up |
-| `botCashout` | bot -> mint | A bot leaves the table with chips left |
+| `botResidual` | bot -> mint | A bot leaves the table with chips left |
 | `round` | player -> player | Settlement. The mint never takes part |
 
 Human and bot buy-ins have separate reasons so they can be reported apart,
@@ -105,7 +105,7 @@ account.
 
 **Master invariant: the sum of every account, the mint included, is exactly
 0, always.** The table asserts it after every round and after every round
-open. The ledger refuses any batch that does not sum to zero, any round that
+open, and the database enforces it at every commit (next section). The ledger refuses any batch that does not sum to zero, any round that
 includes the mint, and any funding batch that is not one transfer between the
 mint and one player, so there is no way to write a chip from nowhere or a
 player-to-player gift. A second, independent check isolates settlement from
@@ -119,6 +119,72 @@ below the minimum to sit may claim a top-up back to the standard buy-in, once
 per account per cooldown (15 minutes by default), measured from their last
 `topup` entry. It is never automatic; the lobby shows it as a choice. It is
 not anti-abuse, and is not meant to be: see "Chip farming by bots".
+
+## The ledger in the database
+
+Chips survive restarts in Postgres, through Drizzle (`packages/server/src/db/`).
+Production uses node-postgres and `DATABASE_URL`; development and tests use
+PGlite (Postgres compiled to WebAssembly) under `.data/`, which is never
+committed. Both run the same SQL migrations, kept in `packages/server/drizzle/`.
+
+| Table | What it holds |
+| --- | --- |
+| `accounts` | `id`, `display_name`, `kind` (`human`, `bot` or `mint`), `balance`, `created_at`. Exactly one `mint` row, created by the first migration |
+| `ledger_entries` | `seq`, `account_id`, `round_id` (set exactly for `round`), `chips`, `reason`, `created_at`. Append-only |
+| `rounds` | `id`, `table_id`, the thrower's seat and account, `commit_hash`, `seed`, `face_up`, `winning_seat`, `hit`, `stake`, `stake_multiplier`, `deltas`, and `replay` (occupants, bets, streak, faces and rules, so a round replays from the database alone; rule 8). Append-only |
+
+The database enforces the rules itself, so a bug in the server cannot break
+them:
+
+- **Append-only.** Triggers raise on any `UPDATE`, `DELETE` or `TRUNCATE` of
+  `ledger_entries` or `rounds`, and on deleting an account. A correction is a
+  new entry.
+- **Balances move only through the ledger.** A trigger on every
+  `ledger_entries` insert adds its chips to the account's `balance` in the
+  same transaction. A direct `UPDATE` of `balance` raises, and a new account
+  starts at 0.
+- **No overdraft.** `CHECK (balance >= 0 OR kind = 'mint')`. An entry that
+  would take a player below zero fails, and its whole transaction with it.
+  The mint may go negative; that is what it is for.
+- **The books balance at every commit.** A deferred constraint trigger
+  refuses to commit unless the entries of every round sum to 0 and every
+  account, the mint included, sums to 0.
+- **A round settles in one transaction**: the round row, an entry for every
+  non-zero delta, and so every balance. The transaction also checks that the
+  round's entries sum to 0 and rolls back if not. Nothing is ever half
+  written. A funding move (`buyin`, `botBuyin`, `topup`, `botResidual`) is
+  one transaction of two entries, the player and the mint.
+- **`verify`** (`pnpm --filter @kauda/server db:verify`, and in the tests)
+  recomputes every balance from `ledger_entries` and compares it with
+  `accounts.balance`. It also checks that all accounts sum to 0, that every
+  round's entries are exactly its recorded deltas, and that there is one
+  mint. It is how to find corruption that got past the triggers, for example
+  a manual fix made with triggers switched off.
+
+### The single-writer rule
+
+**While a player is at a table, every change to their chips goes through the
+room of that table. Nothing else writes to their balance.** The table runs in
+memory and synchronously, and its in-memory ledger is a cache of the database
+for the players at that table:
+
+- On join, the player's balance is loaded from the database. A new account
+  gets the standard buy-in, recorded as a `buyin`.
+- Everything that changes chips at the table (rounds, buy-ins, top-ups, a
+  departing bot's residual) is written to the database in order, through one
+  queue per table, and the table does not move on while a write is pending.
+- **If a write fails, the table pauses for good.** Clients are told, the
+  failure is logged loudly, and nothing after it is written or played. Chips
+  are as of the last write that succeeded. Play never silently continues on
+  state the database does not have.
+- A player may be at only one table at a time, so only one room ever writes
+  their chips. Today this is enforced inside one server process. **Before
+  running more than one game server process, this needs a lock shared by all
+  of them** (an advisory lock or a lease column in Postgres, or Redis).
+  Until then, one process only.
+- Anything else that will ever change a balance (an admin grant, a lobby
+  top-up when the player is at no table) must first make sure the player is
+  at no table, and must write through the same ledger.
 
 ## Threats
 
@@ -194,6 +260,10 @@ balance check before either is recorded.
 
 - Within a table, Colyseus handles a room's messages one at a time, so two
   bets at one table cannot interleave.
+- Across tables, today's defence is the single-writer rule above: a player is
+  at one table at a time, so one room alone writes their chips, and the
+  database's overdraft check is the backstop. The planned escrow below
+  replaces that once there is more than one server process.
 - Across tables, that is not enough. The balance check and the escrow entry
   happen in one database transaction that first takes a row lock on the
   account (`SELECT ... FOR UPDATE` on the account row). Concurrent bets on one
@@ -255,7 +325,7 @@ hope of beating them.
 
 - Our bots play the same zero-edge game, so there is nothing to win from them
   on average. Bots are funded from the mint (`botBuyin`) and hand their
-  residual back to it when they leave (`botCashout`), all in the same ledger,
+  residual back to it when they leave (`botResidual`), all in the same ledger,
   so their wins and losses are recorded too, and a player who is steadily up
   against bots shows up in the data as a net flow out of the mint.
 - Today the only grant is the top-up, and it is limited only by a
@@ -362,11 +432,16 @@ The rules only hold if tooling checks them:
 - ESLint: `no-restricted-properties` on `Math.random` outside `**/test/**` and
   animation code, and `react/no-danger`. `no-restricted-syntax` on assigning
   to `innerHTML` or `outerHTML`.
-- The ledger table: the application's database role has `INSERT` and
-  `SELECT` only, with no `UPDATE` or `DELETE`, and a trigger refuses either
-  one. Amounts are integers (`bigint`) with a `CHECK` that they are not zero.
-  A deferred constraint trigger refuses any transaction whose entries do not
-  sum to zero, or that leaves any account other than the mint below zero.
+- The ledger tables, as built (see "The ledger in the database"): triggers
+  refuse `UPDATE`, `DELETE` and `TRUNCATE` on `ledger_entries` and `rounds`,
+  balances move only through the ledger trigger, a `CHECK` stops any player
+  balance going below zero, and a deferred constraint trigger refuses any
+  commit where a round or the books do not sum to zero. Amounts are integers
+  (`bigint`) with a `CHECK` that they are not zero. Still to do for
+  production: an application database role with `INSERT` and `SELECT` only
+  on the ledger tables, so even the triggers cannot be dropped by the app.
+- `db:verify` against the production database on a schedule, alerting on any
+  problem.
 - A protocol test that lists every client-to-server message type and fails if
   one gains a field named or typed like a result, balance or stake.
 - A replay test that replays recorded rounds from their seeds in CI.

@@ -52,7 +52,7 @@ describe("seat filling", () => {
     // fresh bot was funded from the mint.
     expect(h.table.balance("bot-chauka")).toBe(0);
     const ledger = h.table.ledger.entries();
-    expect(ledger.filter((e) => e.reason === "botCashout")).toEqual([
+    expect(ledger.filter((e) => e.reason === "botResidual")).toEqual([
       expect.objectContaining({ playerId: "bot-chauka", chips: -15 }),
       expect.objectContaining({ playerId: MINT_ACCOUNT, chips: 15 }),
     ]);
@@ -324,9 +324,9 @@ describe("seat filling", () => {
     // bots handed back.
     const playerSide = entries.filter((e) => e.playerId !== MINT_ACCOUNT);
     const net = (reason: string) => playerSide.filter((e) => e.reason === reason).reduce((a, e) => a + e.chips, 0);
-    expect(h.table.ledger.totalInPlay()).toBe(net("buyin") + net("botBuyin") + net("topup") + net("botCashout"));
+    expect(h.table.ledger.totalInPlay()).toBe(net("buyin") + net("botBuyin") + net("topup") + net("botResidual"));
     expect(h.table.ledger.totalInPlay()).toBe(-h.table.ledger.mintBalance());
-    expect(net("botCashout")).toBeLessThan(0);
+    expect(net("botResidual")).toBeLessThan(0);
     h.table.ledger.verify();
     // No chips are left orphaned on a bot that has left.
     const present = new Set(

@@ -228,7 +228,7 @@ export function runDemo(options: DemoOptions): DemoSummary {
   const sumOf = (reasons: readonly LedgerReason[]): number =>
     later.filter((e) => reasons.includes(e.reason)).reduce((acc, e) => acc + e.chips, 0);
   const chipsIssued = sumOf(ISSUE_REASONS);
-  const chipsReturned = -sumOf(["botCashout"]);
+  const chipsReturned = -sumOf(["botResidual"]);
   const botsAdded = new Set(later.filter((e) => e.reason === "botBuyin").map((e) => e.playerId)).size;
   const chipsAtEnd = table.ledger.totalInPlay();
   const mintBalance = table.ledger.mintBalance();

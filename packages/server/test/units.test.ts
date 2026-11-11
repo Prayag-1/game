@@ -80,7 +80,7 @@ describe("ledger", () => {
     const l = new Ledger();
     l.issue("a", 100, "buyin", 1);
     const M = MINT_ACCOUNT;
-    const pair = (reason: "buyin" | "botBuyin" | "topup" | "botCashout", chips: number, id = "a") =>
+    const pair = (reason: "buyin" | "botBuyin" | "topup" | "botResidual", chips: number, id = "a") =>
       [
         { roundId: null, playerId: M, chips: -chips, reason, at: 1 },
         { roundId: null, playerId: id, chips, reason, at: 1 },
@@ -89,7 +89,7 @@ describe("ledger", () => {
       [{ roundId: "r", playerId: "a", chips: -5, reason: "round", at: 1 }],
       pair("topup", 1.5),
       pair("topup", -5), // an issue that takes chips away
-      pair("botCashout", 5), // a cash-out that adds chips
+      pair("botResidual", 5), // a cash-out that adds chips
       pair("buyin", 5, ""),
       pair("buyin", 0),
       // A lone credit with no mint debit: chips from nowhere.
@@ -120,7 +120,7 @@ describe("ledger", () => {
     ] as const;
     for (const batch of bad) expect(() => l.append(batch), JSON.stringify(batch)).toThrow(LedgerError);
     expect(() => l.issue(M, 5, "buyin", 1)).toThrow(LedgerError);
-    expect(() => l.retire(M, "botCashout", 1)).toThrow(LedgerError);
+    expect(() => l.retire(M, "botResidual", 1)).toThrow(LedgerError);
 
     l.issue("b", 10, "buyin", 1);
     const round = [
@@ -153,15 +153,15 @@ describe("ledger", () => {
       { roundId: "r1", playerId: "bot", chips: 300, reason: "round", at: 3 },
     ]);
     // A departing bot's residual goes back to the mint, not onto a dead account.
-    expect(l.retire("bot", "botCashout", 4)).toBe(2_300);
+    expect(l.retire("bot", "botResidual", 4)).toBe(2_300);
     expect(l.balance("bot")).toBe(0);
-    expect(l.retire("bot", "botCashout", 5)).toBe(0); // nothing left: nothing written
+    expect(l.retire("bot", "botResidual", 5)).toBe(0); // nothing left: nothing written
     expect(l.mintBalance()).toBe(-2_200);
     expect(l.totalInPlay()).toBe(2_200);
     expect(l.sumOfAllAccounts()).toBe(0);
     expect(l.entries().reduce((a, e) => a + e.chips, 0)).toBe(0);
     expect(new Set(l.entries().map((e) => e.reason))).toEqual(
-      new Set(["buyin", "botBuyin", "topup", "round", "botCashout"]),
+      new Set(["buyin", "botBuyin", "topup", "round", "botResidual"]),
     );
     // Batches are numbered, and each one sums to zero.
     const byBatch = new Map<number, number>();

@@ -10,47 +10,40 @@
  *
  * - A round moves chips between players. The mint is never part of a round.
  * - A buy-in, bot buy-in or top-up moves chips from the mint to a player.
- * - A bot cash-out moves a departing bot's residual chips back to the mint.
+ * - A departing bot's residual chips move back to the mint ("botResidual").
  *
  * Player accounts may never go below zero. The mint may, and normally does:
  * its balance is exactly minus the chips in existence. So the master
  * invariant is that the sum of every account, the mint included, is 0, and
  * every chip anyone holds traces back to a mint entry.
  *
- * Shape of the Postgres table this mirrors:
- *
- *   CREATE TYPE ledger_reason AS ENUM ('buyin', 'botBuyin', 'topup', 'botCashout', 'round');
- *   CREATE TABLE ledger_entries (
- *     seq       bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
- *     batch     bigint        NOT NULL,  -- one transaction; its entries sum to 0
- *     round_id  text,
- *     player_id text          NOT NULL,  -- 'system:mint' for the mint
- *     chips     bigint        NOT NULL CHECK (chips <> 0),
- *     reason    ledger_reason NOT NULL,
- *     at        timestamptz   NOT NULL,
- *     CHECK ((reason = 'round') = (round_id IS NOT NULL)),
- *     CHECK (reason <> 'round' OR player_id <> 'system:mint'),
- *     UNIQUE (round_id, player_id),
- *     UNIQUE (batch, player_id)
- *   );
- *   -- The application role gets INSERT and SELECT only. No UPDATE, no DELETE.
- *   -- A deferred constraint trigger checks that each batch sums to zero and
- *   -- that no account other than the mint ends a transaction below zero.
+ * With a database (db/), this in-memory ledger is a cache for the players at
+ * one table, and the database is the authority between sessions. Two
+ * reasons exist only here and are never persisted: "opening" brings a
+ * player's balance in from the database when they join, and "closing" clears
+ * a stale cached balance before it is reloaded. Both are mint transfers, so
+ * the in-memory invariant still holds. See db/schema.ts for the real tables.
  */
 
 /** The one system account. Chips come from it and go back to it. */
 export const MINT_ACCOUNT = "system:mint";
 
-export const LEDGER_REASONS = ["buyin", "botBuyin", "topup", "botCashout", "round"] as const;
+export const LEDGER_REASONS = ["buyin", "botBuyin", "topup", "botResidual", "round", "opening", "closing"] as const;
 export type LedgerReason = (typeof LEDGER_REASONS)[number];
 
 /** Reasons that move chips from the mint to a player. */
-export const ISSUE_REASONS = ["buyin", "botBuyin", "topup"] as const;
+export const ISSUE_REASONS = ["buyin", "botBuyin", "topup", "opening"] as const;
 export type IssueReason = (typeof ISSUE_REASONS)[number];
 
 /** Reasons that move chips from a player back to the mint. */
-export const RETIRE_REASONS = ["botCashout"] as const;
+export const RETIRE_REASONS = ["botResidual", "closing"] as const;
 export type RetireReason = (typeof RETIRE_REASONS)[number];
+
+/** Reasons that mirror the database rather than change it. Never persisted. */
+export const IN_MEMORY_REASONS = ["opening", "closing"] as const;
+export type PersistedReason = Exclude<LedgerReason, (typeof IN_MEMORY_REASONS)[number]>;
+export const isPersistedReason = (r: LedgerReason): r is PersistedReason =>
+  !(IN_MEMORY_REASONS as readonly string[]).includes(r);
 
 const isIssue = (r: LedgerReason): r is IssueReason => (ISSUE_REASONS as readonly string[]).includes(r);
 const isRetire = (r: LedgerReason): r is RetireReason => (RETIRE_REASONS as readonly string[]).includes(r);

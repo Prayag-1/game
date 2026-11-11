@@ -18,6 +18,25 @@ pnpm install
 pnpm test
 ```
 
+## Chips database
+
+Balances, the ledger and every round live in Postgres through Drizzle
+(`packages/server/src/db/`, migrations in `packages/server/drizzle/`).
+
+- Without `DATABASE_URL`: PGlite, Postgres in process, stored under
+  `packages/server/.data/` (gitignored). One process at a time per data
+  directory. Delete the directory to start the economy from scratch.
+- With `DATABASE_URL=postgres://…`: node-postgres against a real server.
+
+```bash
+pnpm --filter @kauda/server db:verify    # recompute every balance; all accounts must sum to 0
+pnpm --filter @kauda/server db:migrate   # apply migrations (the dev server also does this on start)
+pnpm --filter @kauda/server db:generate  # after editing src/db/schema.ts; commit the SQL
+```
+
+The rules the database enforces, and the single-writer rule, are in
+`SECURITY.md` under "The ledger in the database".
+
 ## Debug client (developer only)
 
 ```bash

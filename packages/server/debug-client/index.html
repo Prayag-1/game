@@ -33,7 +33,7 @@
   .pill { padding: 1px 8px; border-radius: 999px; border: 1px solid var(--line); font-size: 12px; }
   .pill.connected { background: #e3f4ec; border-color: var(--ok); color: var(--ok); }
   .pill.reconnecting, .pill.connecting { background: #fff4dc; border-color: var(--warn); color: var(--warn); }
-  .pill.disconnected, .pill.replaced, .pill.dropped { background: #fbe4e2; border-color: var(--bad); color: var(--bad); }
+  .pill.disconnected, .pill.replaced, .pill.dropped, .pill.paused { background: #fbe4e2; border-color: var(--bad); color: var(--bad); }
   #banner { padding: 8px 16px; background: #fff4dc; border-bottom: 1px solid var(--warn); color: var(--warn); font-weight: 600; }
   #banner.bad { background: #fbe4e2; border-color: var(--bad); color: var(--bad); }
   .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
@@ -221,7 +221,7 @@
     pill.className = "pill " + conn.split(" ")[0];
     const b = $("banner");
     b.hidden = banner === undefined;
-    b.className = conn === "replaced" || conn === "disconnected" ? "bad" : "";
+    b.className = conn === "replaced" || conn === "disconnected" || conn === "paused" ? "bad" : "";
     b.textContent = banner ?? "";
     $("drop").hidden = conn !== "connected";
     $("reconnect").hidden = !(conn === "dropped" || conn === "disconnected" || conn === "replaced");
@@ -254,6 +254,9 @@
     room.onMessage("error", (e) => showError(e));
     room.onMessage("topUp", (r) => { state.topUp = r; render(); });
     room.onMessage("replaced", () => { state.replaced = true; });
+    room.onMessage("paused", (m) => {
+      setConn("paused", "Table paused: " + String(m && m.reason) + ". Chips are as saved before the failure. Leave and join again to play on.");
+    });
     room.onLeave((code) => onLeave(room, code));
     room.send("sync");
     save(KEY.room, room.roomId);

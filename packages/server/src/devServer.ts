@@ -129,7 +129,12 @@ export async function startDevServer(options: DevServerOptions = {}): Promise<De
     };
   };
 
-  await server.listen(options.port ?? DEFAULT_DEV_PORT, DEV_HOST);
+  // Colyseus logs a listen error (such as a port in use) but does not reject,
+  // so watch the HTTP server's own error event as well.
+  await new Promise<void>((resolve, reject) => {
+    transport.server?.once("error", reject);
+    server.listen(options.port ?? DEFAULT_DEV_PORT, DEV_HOST).then(() => resolve(), reject);
+  });
   port = (transport.server?.address() as AddressInfo).port;
   return {
     server,

@@ -16,7 +16,7 @@ import type { SeatId } from "@kauda/rules";
  * - A human holds at most one reservation, and it expires after a set number
  *   of rounds or a set time (TableOptions.reservationMaxRounds / MaxMs), so
  *   a reservation cannot hold a seat away from the bots for long.
- * - A bot that leaves returns its residual chips to the mint ("botCashout").
+ * - A bot that leaves returns its residual chips to the mint ("botResidual").
  *   Fresh bots are funded from the mint ("botBuyin").
  *
  * Humans who go broke are stood up and keep their real balance. Nothing here

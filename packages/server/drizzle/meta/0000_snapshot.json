@@ -1,0 +1,432 @@
+{
+  "id": "dc40f0cb-6c02-4c11-9542-48d0dc3a46d3",
+  "prevId": "00000000-0000-0000-0000-000000000000",
+  "version": "7",
+  "dialect": "postgresql",
+  "tables": {
+    "public.accounts": {
+      "name": "accounts",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "display_name": {
+          "name": "display_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "kind": {
+          "name": "kind",
+          "type": "account_kind",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "balance": {
+          "name": "balance",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "accounts_one_mint": {
+          "name": "accounts_one_mint",
+          "columns": [
+            {
+              "expression": "kind",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"accounts\".\"kind\" = 'mint'",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "accounts_balance_non_negative": {
+          "name": "accounts_balance_non_negative",
+          "value": "\"accounts\".\"balance\" >= 0 OR \"accounts\".\"kind\" = 'mint'"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.ledger_entries": {
+      "name": "ledger_entries",
+      "schema": "",
+      "columns": {
+        "seq": {
+          "name": "seq",
+          "type": "bigserial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "account_id": {
+          "name": "account_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "round_id": {
+          "name": "round_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "chips": {
+          "name": "chips",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "reason": {
+          "name": "reason",
+          "type": "ledger_reason",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "ledger_one_entry_per_account_per_round": {
+          "name": "ledger_one_entry_per_account_per_round",
+          "columns": [
+            {
+              "expression": "round_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "account_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "ledger_account": {
+          "name": "ledger_account",
+          "columns": [
+            {
+              "expression": "account_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "seq",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "ledger_account_reason": {
+          "name": "ledger_account_reason",
+          "columns": [
+            {
+              "expression": "account_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "reason",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "ledger_entries_account_id_accounts_id_fk": {
+          "name": "ledger_entries_account_id_accounts_id_fk",
+          "tableFrom": "ledger_entries",
+          "tableTo": "accounts",
+          "columnsFrom": [
+            "account_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "ledger_entries_round_id_rounds_id_fk": {
+          "name": "ledger_entries_round_id_rounds_id_fk",
+          "tableFrom": "ledger_entries",
+          "tableTo": "rounds",
+          "columnsFrom": [
+            "round_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "ledger_chips_non_zero": {
+          "name": "ledger_chips_non_zero",
+          "value": "\"ledger_entries\".\"chips\" <> 0"
+        },
+        "ledger_round_iff_reason_round": {
+          "name": "ledger_round_iff_reason_round",
+          "value": "(\"ledger_entries\".\"reason\" = 'round') = (\"ledger_entries\".\"round_id\" IS NOT NULL)"
+        },
+        "ledger_mint_never_in_a_round": {
+          "name": "ledger_mint_never_in_a_round",
+          "value": "\"ledger_entries\".\"reason\" <> 'round' OR \"ledger_entries\".\"account_id\" <> 'system:mint'"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.rounds": {
+      "name": "rounds",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "table_id": {
+          "name": "table_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "thrower_seat": {
+          "name": "thrower_seat",
+          "type": "seat",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "thrower_account_id": {
+          "name": "thrower_account_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "commit_hash": {
+          "name": "commit_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "seed": {
+          "name": "seed",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "face_up": {
+          "name": "face_up",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "winning_seat": {
+          "name": "winning_seat",
+          "type": "seat",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "hit": {
+          "name": "hit",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "stake": {
+          "name": "stake",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "stake_multiplier": {
+          "name": "stake_multiplier",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "deltas": {
+          "name": "deltas",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "replay": {
+          "name": "replay",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "rounds_table": {
+          "name": "rounds_table",
+          "columns": [
+            {
+              "expression": "table_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "rounds_thrower_account_id_accounts_id_fk": {
+          "name": "rounds_thrower_account_id_accounts_id_fk",
+          "tableFrom": "rounds",
+          "tableTo": "accounts",
+          "columnsFrom": [
+            "thrower_account_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "rounds_face_up_range": {
+          "name": "rounds_face_up_range",
+          "value": "\"rounds\".\"face_up\" BETWEEN 0 AND 16"
+        },
+        "rounds_commit_hash_hex": {
+          "name": "rounds_commit_hash_hex",
+          "value": "\"rounds\".\"commit_hash\" ~ '^[0-9a-f]{64}$'"
+        },
+        "rounds_seed_hex": {
+          "name": "rounds_seed_hex",
+          "value": "\"rounds\".\"seed\" ~ '^[0-9a-f]{64}$'"
+        },
+        "rounds_stake_positive": {
+          "name": "rounds_stake_positive",
+          "value": "\"rounds\".\"stake\" > 0 AND \"rounds\".\"stake_multiplier\" > 0"
+        }
+      },
+      "isRLSEnabled": false
+    }
+  },
+  "enums": {
+    "public.account_kind": {
+      "name": "account_kind",
+      "schema": "public",
+      "values": [
+        "human",
+        "bot",
+        "mint"
+      ]
+    },
+    "public.ledger_reason": {
+      "name": "ledger_reason",
+      "schema": "public",
+      "values": [
+        "buyin",
+        "botBuyin",
+        "round",
+        "topup",
+        "botResidual"
+      ]
+    },
+    "public.seat": {
+      "name": "seat",
+      "schema": "public",
+      "values": [
+        "teeya",
+        "chauka",
+        "panja",
+        "chakka"
+      ]
+    }
+  },
+  "schemas": {},
+  "sequences": {},
+  "roles": {},
+  "policies": {},
+  "views": {},
+  "_meta": {
+    "columns": {},
+    "schemas": {},
+    "tables": {}
+  }
+}
