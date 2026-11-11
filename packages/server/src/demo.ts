@@ -1,5 +1,6 @@
 import { DEFAULT_HOUSE_RULES, type HouseRules, type SeatId } from "@kauda/rules";
 import { verifyThrow, type CommitmentFactory } from "./fairness.js";
+import { ISSUE_REASONS, MINT_ACCOUNT, type LedgerReason } from "./ledger.js";
 import type { SeatFillPolicy } from "./seating.js";
 import { Table, type RoundRecord } from "./table.js";
 
@@ -34,11 +35,24 @@ export interface DemoSummary {
   readonly botThrows: number;
   readonly ledgerEntries: number;
   readonly chipsAtStart: number;
-  /** Chips issued after the start, i.e. buy-ins for replacement bots. */
+  /** Chips the mint issued after the start: replacement bots' buy-ins and top-ups. */
   readonly chipsIssued: number;
+  /** Chips departing bots returned to the mint after the start. */
+  readonly chipsReturned: number;
   readonly botsAdded: number;
+  /** Top-ups the human claimed after going broke. */
+  readonly topUps: number;
   readonly chipsAtEnd: number;
-  /** chipsAtEnd = chipsAtStart + chipsIssued, every round sums to zero, and the ledger verifies. */
+  /** Minus the chips in existence. */
+  readonly mintBalance: number;
+  /** Every account, the mint included. Must be 0. */
+  readonly allAccountsSum: number;
+  /** Sum of every "round" entry over the session. Must be 0, whatever funding did. */
+  readonly roundNet: number;
+  /**
+   * The ledger verifies, all accounts sum to 0, round entries net to 0, every
+   * round sums to 0, and chipsAtEnd = chipsAtStart + chipsIssued - chipsReturned.
+   */
   readonly conserved: boolean;
   /** Every throw matched the hash published when its betting opened. */
   readonly allVerified: boolean;
@@ -112,6 +126,8 @@ export function runDemo(options: DemoOptions): DemoSummary {
   let humanThrows = 0;
   let botThrows = 0;
   let stalled = false;
+  let topUps = 0;
+  const human = PEOPLE.find((p) => !p.isBot);
 
   const observe = (): void => {
     const v = table.view();
@@ -174,6 +190,19 @@ export function runDemo(options: DemoOptions): DemoSummary {
     t += STEP_MS;
     table.tick();
     observe();
+    // The human claims a top-up whenever one is on offer (the table never
+    // tops anyone up by itself), and if they were stood up, asks for their
+    // seat back; mid-round that is a reservation for the next round.
+    if (human?.seat !== undefined) {
+      const claim = table.claimTopUp(human.id);
+      if (claim.ok) {
+        topUps += 1;
+        out(`      ${human.name} is below the minimum and claims a top-up of ${claim.chips} chips`);
+      }
+      if (table.seatOf(human.id) === null && table.balance(human.id) >= table.minChipsToSit) {
+        table.handle(human.id, { type: "sit", seat: human.seat });
+      }
+    }
     // The human throws as soon as the throw is theirs.
     const v = table.view();
     if (v.phase === "throwing" && v.thrower !== null && v.seats[v.thrower]?.isBot === false) {
@@ -191,13 +220,22 @@ export function runDemo(options: DemoOptions): DemoSummary {
     } else waitingSince = null;
   }
 
-  // Conservation. Chips enter only through buy-ins; rounds only move them.
+  // Conservation. Chips come only from the mint, and departing bots return
+  // theirs to it; rounds only move chips between players. Counted from the
+  // player side of each transfer.
   const entries = table.ledger.entries();
-  const later = entries.slice(entriesAtStart).filter((e) => e.reason !== "round");
-  const chipsIssued = later.reduce((acc, e) => acc + e.chips, 0);
-  const botsAdded = new Set(later.map((e) => e.playerId)).size;
+  const later = entries.slice(entriesAtStart).filter((e) => e.playerId !== MINT_ACCOUNT);
+  const sumOf = (reasons: readonly LedgerReason[]): number =>
+    later.filter((e) => reasons.includes(e.reason)).reduce((acc, e) => acc + e.chips, 0);
+  const chipsIssued = sumOf(ISSUE_REASONS);
+  const chipsReturned = -sumOf(["botCashout"]);
+  const botsAdded = new Set(later.filter((e) => e.reason === "botBuyin").map((e) => e.playerId)).size;
   const chipsAtEnd = table.ledger.totalInPlay();
-  const everyone = new Set(entries.map((e) => e.playerId));
+  const mintBalance = table.ledger.mintBalance();
+  // Independent of the ledger's own cache: straight from the entries.
+  const allAccountsSum = entries.reduce((acc, e) => acc + e.chips, 0);
+  const roundNet = entries.filter((e) => e.reason === "round").reduce((acc, e) => acc + e.chips, 0);
+  const everyone = new Set(entries.map((e) => e.playerId).filter((id) => id !== MINT_ACCOUNT));
   const balanceSum = [...everyone].reduce((acc, id) => acc + table.balance(id), 0);
   let ledgerOk = true;
   try {
@@ -208,7 +246,10 @@ export function runDemo(options: DemoOptions): DemoSummary {
   }
   const conserved =
     ledgerOk &&
-    chipsAtEnd === chipsAtStart + chipsIssued &&
+    allAccountsSum === 0 &&
+    roundNet === 0 &&
+    chipsAtEnd === chipsAtStart + chipsIssued - chipsReturned &&
+    chipsAtEnd === -mintBalance &&
     balanceSum === chipsAtEnd &&
     !failures.some((f) => f.endsWith("does not sum to zero"));
 
@@ -230,7 +271,10 @@ export function runDemo(options: DemoOptions): DemoSummary {
   const retired = [...everyone].filter((id) => !present.has(id));
   if (retired.length > 0) {
     const held = retired.reduce((acc, id) => acc + table.balance(id), 0);
-    out(`  ${retired.length} bot${retired.length === 1 ? "" : "s"} retired broke, still holding ${held} chips between them`);
+    out(
+      `  ${retired.length} bot${retired.length === 1 ? "" : "s"} left, returning ${chipsReturned} chips to the mint` +
+        (held === 0 ? "" : `; ${held} still on retired accounts`),
+    );
   }
   out("");
   out(`Rounds played   ${printed}${stalled ? " (stopped early: fewer than two players could cover the stake)" : ""}`);
@@ -239,9 +283,11 @@ export function runDemo(options: DemoOptions): DemoSummary {
   out(`Ledger entries  ${entries.length}`);
   out(
     `Chips           ${chipsAtStart} at start` +
-      (chipsIssued > 0 ? ` + ${chipsIssued} bought in by ${botsAdded} replacement bot${botsAdded === 1 ? "" : "s"}` : "") +
-      ` = ${chipsAtStart + chipsIssued}; ${chipsAtEnd} at end`,
+      (chipsIssued > 0 ? ` + ${chipsIssued} issued (${botsAdded} replacement bot${botsAdded === 1 ? "" : "s"}, ${topUps} top-up${topUps === 1 ? "" : "s"})` : "") +
+      (chipsReturned > 0 ? ` - ${chipsReturned} returned` : "") +
+      ` = ${chipsAtStart + chipsIssued - chipsReturned}; ${chipsAtEnd} at end`,
   );
+  out(`Mint            ${mintBalance}; all accounts sum to ${allAccountsSum}; round entries net ${roundNet}`);
   out(`Conserved       ${conserved ? "yes" : "NO"}`);
   out(`Throws verified ${failures.length === 0 ? `all ${printed}` : `${failures.length} FAILED`}`);
   for (const f of failures) out(`  ! ${f}`);
@@ -256,8 +302,13 @@ export function runDemo(options: DemoOptions): DemoSummary {
     ledgerEntries: entries.length,
     chipsAtStart,
     chipsIssued,
+    chipsReturned,
     botsAdded,
+    topUps,
     chipsAtEnd,
+    mintBalance,
+    allAccountsSum,
+    roundNet,
     conserved,
     allVerified: failures.length === 0,
     failures,

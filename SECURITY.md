@@ -80,6 +80,46 @@ Note for phase 2: `throwShells` in `@kauda/rules` currently takes a
 `() => number` source. The server should derive faces from bits as described
 above, so that replay is exact and no float conversion is involved.
 
+## Where chips come from: the mint
+
+Every chip traces back to one system account, the **mint**
+(`system:mint`). The ledger is double entry: every batch of entries sums to
+zero, so chips are only ever moved, never created or destroyed in place.
+
+| Reason | Moves chips | When |
+| --- | --- | --- |
+| `buyin` | mint -> human | A human buys in |
+| `botBuyin` | mint -> bot | A bot joins, or seat filling seats a fresh bot |
+| `topup` | mint -> human | A broke human claims a free top-up |
+| `botCashout` | bot -> mint | A bot leaves the table with chips left |
+| `round` | player -> player | Settlement. The mint never takes part |
+
+Human and bot buy-ins have separate reasons so they can be reported apart,
+for example to see how many chips the bots have absorbed from humans.
+
+Player accounts may never go below zero. The mint may, and normally does: its
+balance is exactly minus the number of chips in existence, so "how many chips
+exist" is one number. A bot exists only for its table, so when it leaves its
+residual chips go back to the mint instead of sitting orphaned on a dead
+account.
+
+**Master invariant: the sum of every account, the mint included, is exactly
+0, always.** The table asserts it after every round and after every round
+open. The ledger refuses any batch that does not sum to zero, any round that
+includes the mint, and any funding batch that is not one transfer between the
+mint and one player, so there is no way to write a chip from nowhere or a
+player-to-player gift. A second, independent check isolates settlement from
+funding: the sum of all `round` entries over any period is 0, so a settlement
+bug cannot hide behind a buy-in.
+
+Top-ups exist because the game is exactly fair: a fair game between one finite
+bankroll and bots that are re-funded forever is gambler's ruin, and the human
+busts with probability 1 (median about 745 rounds from 2000 chips). A human
+below the minimum to sit may claim a top-up back to the standard buy-in, once
+per account per cooldown (15 minutes by default), measured from their last
+`topup` entry. It is never automatic; the lobby shows it as a choice. It is
+not anti-abuse, and is not meant to be: see "Chip farming by bots".
+
 ## Threats
 
 ### Client-side result tampering
@@ -120,8 +160,10 @@ throws that favour one account, or picks a seed after seeing the bets.
 - Rule 8. The seed, client seeds and faces of every round are stored with the
   round's ledger entries. A replay tool recomputes the faces and settlement
   from those alone and flags any mismatch.
-- Ledger invariant: the entries for every round sum to zero, and a periodic
-  job checks it across the whole ledger.
+- Ledger invariants: the entries for every round sum to zero, the `round`
+  entries across the whole ledger net to zero, and every account including
+  the mint sums to zero. A periodic job checks all three across the whole
+  ledger.
 
 What this does not cover: an operator who changes the code that runs, for
 example to leak seeds to one account. Commit-reveal shows that a throw matched
@@ -212,11 +254,16 @@ hope of beating them.
 *Defence.*
 
 - Our bots play the same zero-edge game, so there is nothing to win from them
-  on average. Bots hold chips from a house account in the same ledger, so
-  their wins and losses are recorded too, and a player who is steadily up
-  against bots shows up in the data.
-- Grants are rate-limited per account, per device and per IP, and only come
-  in once an account has played some rounds.
+  on average. Bots are funded from the mint (`botBuyin`) and hand their
+  residual back to it when they leave (`botCashout`), all in the same ledger,
+  so their wins and losses are recorded too, and a player who is steadily up
+  against bots shows up in the data as a net flow out of the mint.
+- Today the only grant is the top-up, and it is limited only by a
+  per-account cooldown. That is deliberate: with guest login a busted player
+  can just create a new guest and get a fresh buy-in, so tighter gating buys
+  nothing until real accounts exist. Once they do, grants should be
+  rate-limited per account, per device and per IP, and only come in once an
+  account has played some rounds.
 - Guest accounts have a small balance ceiling and cannot sit at high-stake
   tables until they have played a while.
 - Rate limits and proof-of-work or a challenge on account creation when
@@ -318,6 +365,8 @@ The rules only hold if tooling checks them:
 - The ledger table: the application's database role has `INSERT` and
   `SELECT` only, with no `UPDATE` or `DELETE`, and a trigger refuses either
   one. Amounts are integers (`bigint`) with a `CHECK` that they are not zero.
+  A deferred constraint trigger refuses any transaction whose entries do not
+  sum to zero, or that leaves any account other than the mint below zero.
 - A protocol test that lists every client-to-server message type and fails if
   one gains a field named or typed like a result, balance or stake.
 - A replay test that replays recorded rounds from their seeds in CI.

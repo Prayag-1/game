@@ -23,8 +23,15 @@ import {
   type Commitment,
   type CommitmentFactory,
 } from "./fairness.js";
-import { Ledger, type NewLedgerEntry } from "./ledger.js";
+import { Ledger, MINT_ACCOUNT, type IssueReason, type NewLedgerEntry } from "./ledger.js";
 import { botSeatFilling, type SeatFillPolicy } from "./seating.js";
+import {
+  DEFAULT_TOP_UP_COOLDOWN_MS,
+  claimTopUp,
+  topUpOffer,
+  type TopUpOffer,
+  type TopUpPolicy,
+} from "./topup.js";
 
 /**
  * One Kauda table as a pure state machine.
@@ -69,8 +76,25 @@ export interface TableOptions {
   readonly rules?: HouseRules;
   /** Balance needed to take a seat. Defaults to a full-cap stake. */
   readonly minChipsToSit?: number;
+  /**
+   * The standard buy-in: what a fresh bot brings and what a human top-up
+   * restores. Defaults to defaultBotBuyIn(rules). At least minChipsToSit.
+   */
+  readonly standardBuyIn?: number;
+  /** Time between top-up claims on one account. See topup.ts. */
+  readonly topUpCooldownMs?: number;
+  /**
+   * A reservation still unhonoured after this many rounds have opened
+   * without it is dropped, and a bot may then take the seat.
+   */
+  readonly reservationMaxRounds?: number;
+  /** Likewise, once it is this old. Whichever limit comes first wins. */
+  readonly reservationMaxMs?: number;
   readonly timings?: Partial<Timings>;
 }
+
+export const DEFAULT_RESERVATION_MAX_ROUNDS = 2;
+export const DEFAULT_RESERVATION_MAX_MS = 60_000;
 
 export interface TableDeps {
   readonly now: () => number;
@@ -111,6 +135,11 @@ export type RejectReason =
 export type CommandResult =
   | { readonly ok: true }
   | { readonly ok: false; readonly reason: RejectReason };
+
+/** A top-up offer or claim at this table. */
+export type TableTopUpResult =
+  | TopUpOffer
+  | { readonly ok: false; readonly reason: "not-at-table" | "not-human"; readonly availableAt: null };
 
 /** Everything needed to check and replay one settled round. */
 export interface RoundRecord {
@@ -188,6 +217,13 @@ interface PlayerState {
   leaving: boolean;
 }
 
+interface Reservation {
+  readonly playerId: string;
+  /** #roundNo when it was made. */
+  readonly roundNo: number;
+  readonly at: number;
+}
+
 interface Bet {
   readonly seat: SeatId;
   readonly chips: number;
@@ -218,6 +254,10 @@ export class Table {
   readonly tableId: string;
   readonly rules: HouseRules;
   readonly minChipsToSit: number;
+  readonly standardBuyIn: number;
+  readonly topUpCooldownMs: number;
+  readonly reservationMaxRounds: number;
+  readonly reservationMaxMs: number;
   readonly timings: Timings;
   readonly ledger: Ledger;
 
@@ -242,8 +282,8 @@ export class Table {
   readonly #bets = new Map<string, Bet>();
   readonly #botsDecided = new Set<string>();
   readonly #records: RoundRecord[] = [];
-  /** Seat -> human waiting to take it at the next round. */
-  readonly #reservations: Partial<Record<SeatId, string>> = {};
+  /** Seat -> human waiting to take it at the next round. At most one per human. */
+  readonly #reservations: Partial<Record<SeatId, Reservation>> = {};
 
   constructor(options: TableOptions, deps: TableDeps) {
     if (!isValidPlayerId(options.tableId)) throw new RangeError("tableId must be a short non-empty string");
@@ -251,6 +291,22 @@ export class Table {
     validateHouseRules(rules);
     const minChipsToSit = options.minChipsToSit ?? rules.thini * rules.maxStakeMultiplier;
     if (!isChipAmount(minChipsToSit, 0)) throw new RangeError("minChipsToSit must be a whole number of chips");
+    const standardBuyIn = options.standardBuyIn ?? defaultBotBuyIn(rules);
+    if (!isChipAmount(standardBuyIn, 1) || standardBuyIn < minChipsToSit) {
+      throw new RangeError("standardBuyIn must be a whole number of chips, at least minChipsToSit");
+    }
+    const topUpCooldownMs = options.topUpCooldownMs ?? DEFAULT_TOP_UP_COOLDOWN_MS;
+    const reservationMaxRounds = options.reservationMaxRounds ?? DEFAULT_RESERVATION_MAX_ROUNDS;
+    const reservationMaxMs = options.reservationMaxMs ?? DEFAULT_RESERVATION_MAX_MS;
+    if (!Number.isSafeInteger(topUpCooldownMs) || topUpCooldownMs < 0) {
+      throw new RangeError("topUpCooldownMs must be a non-negative integer");
+    }
+    if (!Number.isSafeInteger(reservationMaxRounds) || reservationMaxRounds < 1) {
+      throw new RangeError("reservationMaxRounds must be a positive integer");
+    }
+    if (!Number.isSafeInteger(reservationMaxMs) || reservationMaxMs < 1) {
+      throw new RangeError("reservationMaxMs must be a positive integer");
+    }
     const timings = { ...DEFAULT_TIMINGS, ...options.timings };
     for (const [k, v] of Object.entries(timings)) {
       if (!Number.isSafeInteger(v) || v < 0) throw new RangeError(`${k} must be a non-negative integer`);
@@ -259,6 +315,10 @@ export class Table {
     this.tableId = options.tableId;
     this.rules = deepFreeze({ ...rules });
     this.minChipsToSit = minChipsToSit;
+    this.standardBuyIn = standardBuyIn;
+    this.topUpCooldownMs = topUpCooldownMs;
+    this.reservationMaxRounds = reservationMaxRounds;
+    this.reservationMaxMs = reservationMaxMs;
     this.timings = Object.freeze(timings);
     this.ledger = deps.ledger ?? new Ledger();
     this.#now = deps.now;
@@ -266,7 +326,7 @@ export class Table {
     this.#botRandom = deps.botRandom ?? cryptoUnit;
     this.#seatFilling =
       deps.seatFilling === undefined
-        ? botSeatFilling({ buyIn: defaultBotBuyIn(rules), idPrefix: `bot:${options.tableId}:` })
+        ? botSeatFilling({ buyIn: standardBuyIn, idPrefix: `bot:${options.tableId}:` })
         : deps.seatFilling;
     this.#phaseStartedAt = this.#now();
   }
@@ -321,8 +381,8 @@ export class Table {
       bets: [...this.#bets].map(([playerId, b]) => ({ playerId, seat: b.seat, chips: b.chips })),
       phaseEndsAt: this.#phaseEndsAt,
       reservations: TURN_ORDER.flatMap((seat) => {
-        const playerId = this.#reservations[seat];
-        return playerId === undefined ? [] : [{ seat, playerId }];
+        const r = this.#reservations[seat];
+        return r === undefined ? [] : [{ seat, playerId: r.playerId }];
       }),
       lastRound: last,
       rules: this.rules,
@@ -334,10 +394,11 @@ export class Table {
   /**
    * Adds a player, or reconnects one already here. Called by the server after
    * authentication, never from a client message. An optional buy-in is
-   * written to the ledger.
+   * written to the ledger as a transfer from the mint: "buyin" for a human,
+   * "botBuyin" for a bot.
    */
   join(playerId: string, opts: { readonly name: string; readonly isBot?: boolean; readonly buyIn?: number }): CommandResult {
-    if (!isValidPlayerId(playerId)) return reject("malformed");
+    if (!isValidPlayerId(playerId) || playerId === MINT_ACCOUNT) return reject("malformed");
     if (opts.buyIn !== undefined && !isChipAmount(opts.buyIn, 1)) return reject("malformed");
     const existing = this.#players.get(playerId);
     if (existing === undefined && this.#players.size >= MAX_PLAYERS) return reject("table-full");
@@ -354,16 +415,40 @@ export class Table {
       existing.connected = true;
       existing.leaving = false;
     }
-    if (opts.buyIn !== undefined) this.#mint(playerId, opts.buyIn, "buyin");
+    if (opts.buyIn !== undefined) {
+      const isBot = this.#players.get(playerId)?.isBot ?? false;
+      this.#issue(playerId, opts.buyIn, isBot ? "botBuyin" : "buyin");
+    }
     return OK;
   }
 
-  /** Adds chips to a player's balance. Safe at any time, since it only adds. */
-  topUp(playerId: string, chips: number): CommandResult {
-    if (!this.#players.has(playerId)) return reject("not-at-table");
-    if (!isChipAmount(chips, 1)) return reject("malformed");
-    this.#mint(playerId, chips, "topup");
-    return OK;
+  /**
+   * Whether this human could claim a free top-up now, and for how much. For
+   * the lobby to show as a choice; writes nothing. See topup.ts.
+   */
+  topUpOffer(playerId: string): TableTopUpResult {
+    return this.#topUpRefusal(playerId) ?? topUpOffer(this.ledger, playerId, this.#topUpPolicy(), this.#now());
+  }
+
+  /**
+   * Claims a free top-up back to the standard buy-in, if this human is below
+   * the minimum to sit and off cooldown. Only ever on an explicit claim; the
+   * table never tops anyone up by itself. Safe in any phase, since it only
+   * adds chips.
+   */
+  claimTopUp(playerId: string): TableTopUpResult {
+    return this.#topUpRefusal(playerId) ?? claimTopUp(this.ledger, playerId, this.#topUpPolicy(), this.#now());
+  }
+
+  #topUpRefusal(playerId: string): TableTopUpResult | null {
+    const p = this.#players.get(playerId);
+    if (p === undefined || p.leaving) return { ok: false, reason: "not-at-table", availableAt: null };
+    if (p.isBot) return { ok: false, reason: "not-human", availableAt: null };
+    return null;
+  }
+
+  #topUpPolicy(): TopUpPolicy {
+    return { standardBuyIn: this.standardBuyIn, minChipsToSit: this.minChipsToSit, cooldownMs: this.topUpCooldownMs };
   }
 
   setConnected(playerId: string, connected: boolean): void {
@@ -399,7 +484,8 @@ export class Table {
         const holder = holderId === undefined ? undefined : this.#players.get(holderId);
         // A human is never displaced.
         if (holder !== undefined && !holder.isBot && !holder.leaving) return reject("seat-taken");
-        const reservedBy = this.#reservations[cmd.seat];
+        this.#expireReservations(this.#now());
+        const reservedBy = this.#reservations[cmd.seat]?.playerId;
         if (reservedBy !== undefined && reservedBy !== player.id) return reject("seat-taken");
         // The minimum is not enough on its own: the player must also cover
         // the stake as it stands, or they would just be stood up again.
@@ -409,8 +495,14 @@ export class Table {
           // Mid-round, a human may reserve the seat for the next round. Bots
           // only ever sit between rounds.
           if (player.isBot) return reject("wrong-phase");
-          this.#clearReservation(player.id);
-          this.#reservations[cmd.seat] = player.id;
+          // One reservation per player: asking for another seat moves it. It
+          // keeps its age, so asking again cannot hold off its expiry.
+          const previous = this.#takeReservation(player.id);
+          this.#reservations[cmd.seat] = {
+            playerId: player.id,
+            roundNo: previous?.roundNo ?? this.#roundNo,
+            at: previous?.at ?? this.#now(),
+          };
           return OK;
         }
         if (holder !== undefined) {
@@ -477,9 +569,7 @@ export class Table {
           player.connected = false;
           return OK;
         }
-        this.#bets.delete(player.id);
-        if (seat !== null) delete this.#seats[seat];
-        this.#players.delete(player.id);
+        this.#removePlayer(player.id);
         return OK;
       }
     }
@@ -562,6 +652,8 @@ export class Table {
 
     const live = this.#isLive();
     if (live) this.#honourReservations();
+    // What could not be honoured is about to miss a round; stale ones go.
+    this.#expireReservations(at, 1);
 
     // Stand anyone who can no longer cover their worst case at the current
     // stake, so every seated player in a round is solvent, then fill empty
@@ -587,6 +679,8 @@ export class Table {
       if (live && this.#fillEmptySeats()) continue;
       break;
     }
+    // Bot buy-ins and cash-outs above all go through the mint.
+    this.ledger.assertBalanced();
 
     if (!this.#canStart()) {
       this.#enter("waiting", at, null);
@@ -618,6 +712,8 @@ export class Table {
       .map(([playerId, chips]) => ({ roundId: round.id, playerId, chips, reason: "round", at }));
     // Cannot go negative: solvency was checked at the open and on every bet.
     this.ledger.append(entries);
+    // Master invariant: every account, the mint included, sums to zero.
+    this.ledger.assertBalanced();
 
     this.#records.push(
       deepFreeze<RoundRecord>({
@@ -689,7 +785,7 @@ export class Table {
   /** Seats each human who reserved a seat, if it is free or held by a bot. */
   #honourReservations(): void {
     for (const seat of TURN_ORDER) {
-      const id = this.#reservations[seat];
+      const id = this.#reservations[seat]?.playerId;
       if (id === undefined) continue;
       const p = this.#players.get(id);
       if (p === undefined || p.leaving || this.seatOf(id) !== null || this.balance(id) < this.minChipsToSit) {
@@ -706,6 +802,23 @@ export class Table {
   }
 
   /**
+   * Drops reservations that are too old, so a seat cannot be held for a
+   * human who never takes it. `pending` counts a round about to open without
+   * them. Reservations are only used when a round opens or someone sits, so
+   * checking at those two points is enough.
+   */
+  #expireReservations(at: number, pending = 0): void {
+    for (const seat of TURN_ORDER) {
+      const r = this.#reservations[seat];
+      if (r === undefined) continue;
+      const roundsMissed = this.#roundNo + pending - r.roundNo;
+      if (roundsMissed > this.reservationMaxRounds || at - r.at >= this.reservationMaxMs) {
+        delete this.#reservations[seat];
+      }
+    }
+  }
+
+  /**
    * Seats a fresh bot in every empty seat that no human has reserved.
    * Returns true if anyone was seated.
    */
@@ -718,7 +831,12 @@ export class Table {
       if (this.#players.size >= MAX_PLAYERS) break;
       const bot = policy.nextBot(seat);
       if (bot === null) continue;
-      if (!isValidPlayerId(bot.id) || this.#players.has(bot.id) || this.ledger.balance(bot.id) !== 0) {
+      if (
+        !isValidPlayerId(bot.id) ||
+        bot.id === MINT_ACCOUNT ||
+        this.#players.has(bot.id) ||
+        this.ledger.hasAccount(bot.id)
+      ) {
         throw new Error(`seat filling produced an unusable bot id ${JSON.stringify(bot.id)}`);
       }
       // Check the bot could cover this seat before minting any chips for it.
@@ -731,7 +849,7 @@ export class Table {
         continue;
       }
       this.#players.set(bot.id, { id: bot.id, name: bot.name, isBot: true, connected: true, leaving: false });
-      this.#mint(bot.id, bot.buyIn, "buyin");
+      this.#issue(bot.id, bot.buyIn, "botBuyin");
       seated = true;
     }
     return seated;
@@ -749,8 +867,14 @@ export class Table {
     }
   }
 
-  /** Takes a player off the table. Their ledger balance is untouched. */
+  /**
+   * Takes a player off the table. A human keeps their balance. A bot exists
+   * only for this table, so its residual chips go back to the mint rather
+   * than sit orphaned on a dead account. Only called between rounds or with
+   * nothing at risk, so the whole balance is free to move.
+   */
   #removePlayer(playerId: string): void {
+    if (this.#players.get(playerId)?.isBot) this.ledger.retire(playerId, "botCashout", this.#now());
     const seat = this.seatOf(playerId);
     if (seat !== null) delete this.#seats[seat];
     this.#bets.delete(playerId);
@@ -760,13 +884,19 @@ export class Table {
   }
 
   #clearReservation(playerId: string): boolean {
+    return this.#takeReservation(playerId) !== null;
+  }
+
+  /** Removes this player's reservation, if any, and returns it. */
+  #takeReservation(playerId: string): Reservation | null {
     for (const seat of TURN_ORDER) {
-      if (this.#reservations[seat] === playerId) {
+      const r = this.#reservations[seat];
+      if (r?.playerId === playerId) {
         delete this.#reservations[seat];
-        return true;
+        return r;
       }
     }
-    return false;
+    return null;
   }
 
   /** Puts the throw on an occupied seat. A new person on the throw starts a fresh turn. */
@@ -822,7 +952,8 @@ export class Table {
     for (const p of [...this.#players.values()]) if (p.leaving) this.#removePlayer(p.id);
   }
 
-  #mint(playerId: string, chips: number, reason: "buyin" | "topup"): void {
-    this.ledger.append([{ roundId: null, playerId, chips, reason, at: this.#now() }]);
+  /** Moves chips from the mint to a player. */
+  #issue(playerId: string, chips: number, reason: IssueReason): void {
+    this.ledger.issue(playerId, chips, reason, this.#now());
   }
 }

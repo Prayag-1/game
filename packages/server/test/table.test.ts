@@ -125,6 +125,15 @@ describe("conservation", () => {
     const records = h.table.records();
     expect(records.length).toBeGreaterThanOrEqual(60);
     expect(h.table.ledger.totalInPlay()).toBe(issued);
+    expect(h.table.ledger.mintBalance()).toBe(-issued);
+    const entries = h.table.ledger.entries();
+    expect(entries.reduce((a, e) => a + e.chips, 0)).toBe(0);
+    expect(entries.filter((e) => e.reason === "round").reduce((a, e) => a + e.chips, 0)).toBe(0);
+    // Humans and bots are funded under separate reasons.
+    const credited = (reason: string) =>
+      entries.filter((e) => e.reason === reason && e.chips > 0).map((e) => e.playerId).sort();
+    expect(credited("buyin")).toEqual(["A", "B", "H"]);
+    expect(credited("botBuyin")).toEqual(["X", "Y", "Z1", "Z2"]);
     h.table.ledger.verify();
     for (const r of records) expect(Object.values(r.deltas).reduce((a, b) => a + b, 0)).toBe(0);
     for (const p of players) expect(h.table.balance(p.id)).toBeGreaterThanOrEqual(0);
@@ -363,7 +372,7 @@ describe("seating", () => {
     const h = harness({ minChipsToSit: 100 });
     h.ok(h.table.join("A", { name: "A", buyIn: 99 }));
     expect(h.table.handle("A", { type: "sit", seat: "teeya" })).toEqual({ ok: false, reason: "insufficient-chips" });
-    h.ok(h.table.topUp("A", 1));
+    expect(h.table.claimTopUp("A")).toEqual({ ok: true, chips: h.table.standardBuyIn - 99 });
     h.ok(h.table.handle("A", { type: "sit", seat: "teeya" }));
   });
 

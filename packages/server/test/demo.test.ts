@@ -3,9 +3,9 @@ import { createHash } from "node:crypto";
 import { HIT, MISS, commitmentFromSeed, runDemo } from "../src/index.js";
 import { lcg } from "./harness.js";
 
-function deterministic() {
+function deterministic(prefix = "demo") {
   let i = 0;
-  return () => commitmentFromSeed(Uint8Array.from(createHash("sha256").update(`demo-${i++}`).digest()));
+  return () => commitmentFromSeed(Uint8Array.from(createHash("sha256").update(`${prefix}-${i++}`).digest()));
 }
 
 describe("terminal demo", () => {
@@ -23,7 +23,27 @@ describe("terminal demo", () => {
     expect(roundLines.some((l) => l.includes(MISS))).toBe(true);
     expect(s.conserved).toBe(true);
     expect(s.allVerified).toBe(true);
-    expect(s.chipsAtEnd).toBe(s.chipsAtStart + s.chipsIssued);
+    // Settlement alone nets to zero, whatever funding did.
+    expect(s.roundNet).toBe(0);
+    // Every account, the mint included, sums to zero.
+    expect(s.allAccountsSum).toBe(0);
+    expect(s.chipsAtEnd).toBe(-s.mintBalance);
+    expect(s.chipsAtEnd).toBe(s.chipsAtStart + s.chipsIssued - s.chipsReturned);
+  });
+
+  it("lets a human who goes broke claim a top-up and sit again, and still conserves", () => {
+    const lines: string[] = [];
+    // A buy-in just over the 80-chip minimum, and a seed stream in which the
+    // human drops below it early.
+    const s = runDemo({ rounds: 300, buyIn: 100, out: (l) => lines.push(l), commitments: deterministic("bust-a"), botRandom: lcg(5) });
+    expect(s.roundsPlayed).toBe(300);
+    expect(s.topUps).toBeGreaterThanOrEqual(1);
+    expect(lines.some((l) => l.includes("claims a top-up"))).toBe(true);
+    expect(s.chipsReturned).toBeGreaterThan(0);
+    expect(s.roundNet).toBe(0);
+    expect(s.allAccountsSum).toBe(0);
+    expect(s.conserved).toBe(true);
+    expect(s.allVerified).toBe(true);
   });
 
   it("stops at once if the seed source hands back a seed that does not match its hash", () => {

@@ -13,9 +13,15 @@ import type { SeatId } from "@kauda/rules";
  * - A seat a human leaves, or is stood up from, gets a bot.
  * - A human is never displaced, and a seat a human has reserved is never given
  *   to a bot. A human may take a bot's seat between rounds; the bot leaves.
+ * - A human holds at most one reservation, and it expires after a set number
+ *   of rounds or a set time (TableOptions.reservationMaxRounds / MaxMs), so
+ *   a reservation cannot hold a seat away from the bots for long.
+ * - A bot that leaves returns its residual chips to the mint ("botCashout").
+ *   Fresh bots are funded from the mint ("botBuyin").
  *
- * Humans who go broke are stood up and keep their real balance. They are
- * never topped up here; that is for the lobby to offer.
+ * Humans who go broke are stood up and keep their real balance. Nothing here
+ * tops them up; they may claim a top-up themselves (topup.ts), which the
+ * lobby offers as a choice.
  *
  * The policy is injected so tests (and any table that wants it) can turn it
  * off and still see empty seats and pushes.
