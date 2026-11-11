@@ -5,7 +5,7 @@ import type { AddressInfo } from "node:net";
 import { fileURLToPath } from "node:url";
 import { JSDOM } from "jsdom";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { DEV_HOST, startDevServer, type DevServer } from "../src/devServer.js";
+import { DEV_HOST, contentSecurityPolicy, startDevServer, type DevServer } from "../src/devServer.js";
 
 /**
  * The dev server and the debug client, end to end: real HTTP, real sockets,
@@ -104,6 +104,19 @@ describe("dev server", () => {
     expect(csp).toContain(`script-src 'self' 'sha256-${b64(inline)}'`);
     expect(csp).toContain(`style-src 'sha256-${b64(style)}'`);
     dom.window.close();
+  });
+
+  it("hashes as a browser does, so a CRLF checkout still matches", () => {
+    // Git on Windows may check the page out with CRLF; the HTML parser turns
+    // it back into LF before the browser hashes the inline script and style.
+    const crlf = HTML.replace(/\r?\n/g, "\r\n");
+    const lf = HTML.replace(/\r\n/g, "\n");
+    expect(contentSecurityPolicy(crlf, 3000)).toBe(contentSecurityPolicy(lf, 3000));
+    const doc = new JSDOM(crlf).window.document;
+    const b64 = (s: string) => createHash("sha256").update(s, "utf8").digest("base64");
+    const csp = contentSecurityPolicy(crlf, 3000);
+    expect(csp).toContain(`'sha256-${b64(doc.querySelector("script:not([src])")?.textContent ?? "")}'`);
+    expect(csp).toContain(`'sha256-${b64(doc.querySelector("style")?.textContent ?? "")}'`);
   });
 
   it("serves the Colyseus browser SDK from /vendor", async () => {

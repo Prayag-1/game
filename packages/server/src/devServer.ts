@@ -48,11 +48,17 @@ export interface DevServer {
   close(): Promise<void>;
 }
 
-/** The sha256 CSP source for the content of the page's single bare <tag>. */
+/**
+ * The sha256 CSP source for the content of the page's single bare <tag>.
+ * Browsers hash the element's text after the HTML parser has turned CRLF and
+ * lone CR into LF, so this does the same: a Windows checkout with CRLF line
+ * endings must still produce the hash the browser computes.
+ */
 function inlineHash(html: string, tag: "script" | "style"): string {
   const match = new RegExp(`<${tag}>([\\s\\S]*?)</${tag}>`).exec(html);
   if (match?.[1] === undefined) throw new Error(`debug client has no inline <${tag}>`);
-  return `'sha256-${createHash("sha256").update(match[1], "utf8").digest("base64")}'`;
+  const text = match[1].replace(/\r\n?/g, "\n");
+  return `'sha256-${createHash("sha256").update(text, "utf8").digest("base64")}'`;
 }
 
 export function contentSecurityPolicy(html: string, port: number): string {
