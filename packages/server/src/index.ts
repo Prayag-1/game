@@ -6,3 +6,5 @@ export * from "./table.js";
 export * from "./seating.js";
 export * from "./demo.js";
 export * from "./topup.js";
+export * from "./identity.js";
+export * from "./room.js";
