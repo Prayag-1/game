@@ -57,6 +57,21 @@ buy-in and a session cookie. A refresh brings you back as the same player;
 Logout and a new guest give a fresh account. A guest has no password, so
 clearing the browser's cookies loses the account.
 
+After signing in you land in the lobby:
+
+- **Quick Play** seats you at the public table with the most people that has
+  room, or opens a new one.
+- **Join** joins a particular public table from the list.
+- **Create Private Table** makes a table with "default" or "simple" rules
+  (simple means no doubling, no ghanti) and shows a link like
+  `http://127.0.0.1:3000/?code=K7RM2Q` to send to friends. Opening the link
+  goes straight to that table after sign-in.
+- **Join by Code** joins a private table by its code.
+
+**Leave Table** returns you to the lobby. Empty tables go away: public ones
+after 2 minutes, private ones after 10 minutes, and the code dies with the
+table.
+
 > **For your own machine only. Never expose it to a network.** It runs over
 > plain HTTP on 127.0.0.1, with a development signing key and Turnstile test
 > keys. The session design itself is described in `SECURITY.md`, "Identity:

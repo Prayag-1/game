@@ -34,11 +34,14 @@ import { fileURLToPath } from "node:url";
 import { Server, matchMaker } from "@colyseus/core";
 import { WebSocketTransport } from "@colyseus/ws-transport";
 import { DEFAULT_HOUSE_RULES } from "@kauda/rules";
-import { mountSessionRoutes, sessionIdentity, type RouteApp } from "./auth/http.js";
+import { mountSessionRoutes, sessionIdentity } from "./auth/http.js";
 import { RateLimiter } from "./auth/rateLimit.js";
 import { Sessions } from "./auth/sessions.js";
 import type { TurnstileVerifier } from "./auth/turnstile.js";
 import type { DrizzleChipStore } from "./db/store.js";
+import type { RouteApp } from "./httpRoutes.js";
+import { TableDirectory } from "./lobby/directory.js";
+import { mountTableRoutes } from "./lobby/http.js";
 import { defineKaudaRoom, type KaudaRoomDeps } from "./room.js";
 import { defaultBotBuyIn } from "./table.js";
 
@@ -46,6 +49,9 @@ import { defaultBotBuyIn } from "./table.js";
 export const DEV_HOST = "127.0.0.1";
 export const DEFAULT_DEV_PORT = 3000;
 export const DEFAULT_GUESTS_PER_HOUR = 5;
+/** Table code guesses allowed per 10 minutes: per IP, and per session. */
+export const DEFAULT_CODE_GUESSES = { perIp: 30, perSession: 10, windowMs: 10 * 60_000 } as const;
+export const DEFAULT_PRIVATE_TABLES_PER_HOUR = 10;
 const TURNSTILE_ORIGIN = "https://challenges.cloudflare.com";
 
 const CLIENT_HTML = fileURLToPath(new URL("../debug-client/index.html", import.meta.url));
@@ -65,6 +71,11 @@ export interface DevServerOptions {
     readonly guestsPerHour?: number;
     readonly now?: () => number;
   };
+  /** Lobby limits, for tests. */
+  readonly lobby?: {
+    readonly codeGuesses?: { readonly perIp?: number; readonly perSession?: number; readonly windowMs?: number };
+    readonly privateTablesPerHour?: number;
+  };
   /** Overrides for the room, for tests. */
   readonly room?: Partial<KaudaRoomDeps>;
 }
@@ -72,6 +83,7 @@ export interface DevServerOptions {
 export interface DevServer {
   readonly server: Server;
   readonly sessions: Sessions;
+  readonly directory: TableDirectory;
   readonly port: number;
   readonly url: string;
   close(): Promise<void>;
@@ -118,6 +130,9 @@ export async function startDevServer(options: DevServerOptions): Promise<DevServ
   });
   const rules = options.room?.table?.rules ?? DEFAULT_HOUSE_RULES;
   const buyIn = options.room?.table?.standardBuyIn ?? defaultBotBuyIn(rules);
+  const directory = new TableDirectory("kauda", options.room?.now ?? options.auth.now);
+  const guesses = { ...DEFAULT_CODE_GUESSES, ...options.lobby?.codeGuesses };
+  const now = options.auth.now;
 
   const transport = new WebSocketTransport({
     // Refuse any upgrade whose Origin is not this server, and one with none.
@@ -160,13 +175,32 @@ export async function startDevServer(options: DevServerOptions): Promise<DevServ
         sessions,
         turnstile: options.auth.turnstile,
         turnstileSiteKey: options.auth.turnstileSiteKey,
-        guestLimiter: new RateLimiter(options.auth.guestsPerHour ?? DEFAULT_GUESTS_PER_HOUR, 60 * 60 * 1000, options.auth.now),
+        guestLimiter: new RateLimiter(options.auth.guestsPerHour ?? DEFAULT_GUESTS_PER_HOUR, 60 * 60 * 1000, now),
         buyIn,
+        allowedOrigins: origins,
+        onLogout: (accountId) => directory.endAccount(accountId),
+      });
+      mountTableRoutes(app as unknown as RouteApp, {
+        sessions,
+        directory,
+        codeGuessesPerIp: new RateLimiter(guesses.perIp, guesses.windowMs, now),
+        codeGuessesPerSession: new RateLimiter(guesses.perSession, guesses.windowMs, now),
+        privateTablesPerSession: new RateLimiter(
+          options.lobby?.privateTablesPerHour ?? DEFAULT_PRIVATE_TABLES_PER_HOUR,
+          60 * 60 * 1000,
+          now,
+        ),
         allowedOrigins: origins,
       });
     },
   });
-  server.define("kauda", defineKaudaRoom({ identity: sessionIdentity(sessions), store: options.store, ...options.room }));
+  server.define("kauda", defineKaudaRoom({ identity: sessionIdentity(sessions), store: options.store, directory, ...options.room }));
+
+  // Only the server reserves seats (TableDirectory, through the /tables
+  // routes). Colyseus's own client matchmaking routes would let anyone create
+  // a room, or join one by id or by name, around private codes and the
+  // one-table rule, so none of them is exposed.
+  matchMaker.controller.exposedMethods = [];
 
   // Matchmaking CORS: answer only our own origin. Anything else is told our
   // origin, which never matches, so the browser blocks it.
@@ -188,6 +222,7 @@ export async function startDevServer(options: DevServerOptions): Promise<DevServ
   return {
     server,
     sessions,
+    directory,
     port,
     url: `http://${DEV_HOST}:${port}/`,
     close: () => server.gracefullyShutdown(false),

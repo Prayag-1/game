@@ -180,7 +180,10 @@ for the players at that table:
   are as of the last write that succeeded. Play never silently continues on
   state the database does not have.
 - A player may be at only one table at a time, so only one room ever writes
-  their chips. Today this is enforced inside one server process. **Before
+  their chips. Taking a seat at another table first takes the player off the
+  one they are at, with the same semantics as a voluntary leave. If they have
+  chips in a round there, the move waits until that round has settled and
+  been written. Today this is enforced inside one server process. **Before
   running more than one game server process, this needs a lock shared by all
   of them** (an advisory lock or a lease column in Postgres, or Redis).
   Until then, one process only.
@@ -430,6 +433,39 @@ This is built, not planned (`packages/server/src/auth/`).
 - **One origin.** The page, the session routes and the WebSocket share one
   origin, which is why the cookie reaches the upgrade. Production must keep
   them on one origin too, or move to an explicit token handshake.
+- **Logout ends play at once.** `POST /session/logout` revokes the session
+  and immediately closes every open table connection of that account, which
+  leaves its table as a voluntary leave would. A revoked session cannot take
+  a seat again.
+
+### Tables, the lobby and private codes
+
+Built (`packages/server/src/lobby/`):
+
+- **Only the server reserves seats.** Colyseus's own client matchmaking
+  routes (`/matchmake/joinOrCreate`, `join`, `create`, `joinById`,
+  `reconnect`) are switched off: they would let anyone create a room, or
+  join one by id or by name, around private codes and the one-table rule.
+  A seat comes only from the `/tables` routes, which need a session.
+- **A reserved seat belongs to one account.** The room checks, on the
+  WebSocket upgrade, that the session cookie's account is the one the seat
+  was reserved for.
+- **Public tables** are listed by `GET /tables`, with counts, phase, rules
+  preset and stake, and nothing about who is at them. Quick Play picks the
+  public table with the most humans that has room.
+- **Private tables** are never listed, never chosen by Quick Play, and cannot
+  be joined by id, even by someone who learns the id.
+  - The only way in is the 6-character code, from the OS CSPRNG, over a
+    32-symbol alphabet with no `0`, `O`, `1`, `I` or lowercase letters
+    (about 10^9 codes).
+  - A wrong code, a malformed one and a dead one all get the same plain 404.
+  - Guesses are rate-limited per session (10 per 10 minutes) and per IP (30
+    per 10 minutes), and every guess counts, right or wrong.
+  - The code dies when the table is disposed, after 10 minutes with no
+    humans; a public table goes after 2 minutes.
+  - Creating private tables is limited to 10 per session per hour.
+- **Nobody has powers over anyone.** A table's creator only picks its preset.
+  There is no kick, and no host.
 
 Known gaps, to close before this faces the internet:
 
@@ -439,10 +475,10 @@ Known gaps, to close before this faces the internet:
   address. Behind a proxy it must read the proxy's own header, and only
   that. Colyseus itself trusts `X-Forwarded-For` for `AuthContext.ip`, which
   any client can forge, so that value is a hint, never a key for a limit.
-- **Logout and live connections.** Logging out does not yet close the
-  account's open connections. They end at their next reconnect.
 - **Revoking every session** of an account (say, "log out everywhere") is
-  not built yet.
+  not built yet. Logout ends the one session it is called with.
+- **The lobby is per process too:** the table directory, codes and the
+  one-table rule all live in one server's memory.
 
 ### Denial of service
 

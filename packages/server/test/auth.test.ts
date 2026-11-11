@@ -107,6 +107,19 @@ function sdk(cookie?: string): Client {
   return new Client(own(), { headers: { Origin: own(), ...(cookie === undefined ? {} : { Cookie: cookie }) } });
 }
 
+/**
+ * Takes a seat the way the client does: the server reserves it (Colyseus's
+ * own client matchmaking is switched off), then the SDK connects with it,
+ * presenting `asCookie` on the WebSocket upgrade.
+ */
+async function seat(cookie: string, asCookie: string | null = cookie, path = "/tables/quickplay"): Promise<SDKRoom> {
+  const reply = await http("POST", path, { body: {}, cookie });
+  expect(reply.status, JSON.stringify(reply.json)).toBe(200);
+  const room = await sdk(asCookie ?? undefined).consumeSeatReservation(reply.json?.reservation as never);
+  room.reconnection.enabled = false;
+  return room;
+}
+
 async function welcomeOf(room: SDKRoom): Promise<string> {
   return new Promise((resolve) => {
     room.onMessage("welcome", (m: { playerId: string }) => resolve(m.playerId));
@@ -213,24 +226,26 @@ describe("sessions", () => {
 
 describe("joining a room", () => {
   it("refuses a join with no session, and resolves a valid one to its account", async () => {
-    await expect(sdk().joinOrCreate("kauda", {})).rejects.toThrow(/identity/);
-    // A token in the join options is ignored entirely.
-    await expect(sdk().joinOrCreate("kauda", { token: "anything", playerId: "guest:x" })).rejects.toThrow(/identity/);
     const { cookie, id } = await guest("Indra");
-    const room = await sdk(cookie).joinOrCreate("kauda", {});
-    room.reconnection.enabled = false;
+    const other = await guest("Other");
+    // A seat reserved for Indra, taken with no session: refused.
+    await expect(seat(cookie, null)).rejects.toThrow(/identity/);
+    // Taken with someone else's session: refused too.
+    await expect(seat(cookie, other.cookie)).rejects.toThrow(/reserved for another account/);
+    // And the client's own matchmaking is off, so no join options reach a room at all.
+    await expect(sdk(cookie).joinOrCreate("kauda", { token: "anything", playerId: "guest:x" })).rejects.toThrow(/invalid method/);
+    const room = await seat(cookie);
     expect(await welcomeOf(room)).toBe(id);
     await room.leave(true);
   });
 
   it("replaces the first connection when the same session connects again", async () => {
     const { cookie, id } = await guest("Jamuna");
-    const first = await sdk(cookie).joinOrCreate("kauda", {});
-    first.reconnection.enabled = false;
+    const first = await seat(cookie);
     expect(await welcomeOf(first)).toBe(id);
     const closed = new Promise<number>((resolve) => first.onLeave((code) => resolve(code)));
-    const second = await sdk(cookie).joinById(first.roomId, {});
-    second.reconnection.enabled = false;
+    const second = await seat(cookie, cookie, "/tables/rejoin");
+    expect(second.roomId).toBe(first.roomId);
     expect(await welcomeOf(second)).toBe(id);
     expect(await closed).toBe(4100);
     await second.leave(true);
@@ -257,8 +272,7 @@ describe("logs", () => {
     try {
       ({ cookie } = await guest("Kamal"));
       await http("GET", "/session/me", { cookie });
-      const room = await sdk(cookie).joinOrCreate("kauda", {});
-      room.reconnection.enabled = false;
+      const room = await seat(cookie);
       await welcomeOf(room);
       room.send("command", { type: "sit", seat: "teeya" });
       room.send("bogus", {});

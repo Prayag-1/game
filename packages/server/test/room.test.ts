@@ -389,7 +389,8 @@ describe("KaudaRoom", () => {
     await until(() => first.closedWith !== null, "the first connection to close");
     expect(first.closedWith).toBe(REPLACED_CLOSE_CODE);
     expect(first.replaced).toBe(true);
-    expect(room.clients).toHaveLength(1);
+    // The server drops the old connection a beat after the client sees it close.
+    await until(() => room.clients.length === 1, "the server to drop the old connection");
     expect(room.away()).toEqual([]); // a replacement is not a disconnect
     const me = room.table.view().chyakhe.filter((p) => p.playerId === first.playerId);
     expect(me).toHaveLength(1);

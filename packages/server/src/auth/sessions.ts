@@ -130,14 +130,19 @@ export class Sessions {
     return { accountId: row.accountId, displayName: row.displayName, refresh: this.#setCookie(raw) };
   }
 
-  /** Revokes the session in this Cookie header, if it is a valid one. */
-  async revoke(cookieHeader: string | null | undefined): Promise<void> {
+  /**
+   * Revokes the session in this Cookie header, if it is a valid one that was
+   * still live. Returns its account, so the caller can end its connections.
+   */
+  async revoke(cookieHeader: string | null | undefined): Promise<string | null> {
     const raw = this.#verifiedId(cookieHeader);
-    if (raw === null) return;
-    await this.#db
+    if (raw === null) return null;
+    const revoked = await this.#db
       .update(sessions)
       .set({ revokedAt: new Date(this.#now()) })
-      .where(and(eq(sessions.id, sha256Hex(raw)), isNull(sessions.revokedAt)));
+      .where(and(eq(sessions.id, sha256Hex(raw)), isNull(sessions.revokedAt)))
+      .returning({ accountId: sessions.accountId });
+    return revoked[0]?.accountId ?? null;
   }
 
   /** A Set-Cookie value that deletes the session cookie. */

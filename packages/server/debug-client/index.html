@@ -62,7 +62,10 @@
   .bad { color: var(--bad); font-weight: 700; }
   #log { list-style: none; padding: 0; margin: 0; max-height: 320px; overflow-y: auto; display: grid; gap: 4px; }
   #log li { border-bottom: 1px dashed var(--line); padding-bottom: 4px; }
-  #error { color: var(--bad); min-height: 1.4em; }
+  #error, #lobby-error { color: var(--bad); min-height: 1.4em; }
+  #tables { width: 100%; border-collapse: collapse; }
+  #tables th, #tables td { text-align: left; padding: 4px 6px; border-bottom: 1px solid var(--line); }
+  #share { background: #e3f4ec; border: 1px solid var(--ok); border-radius: 6px; padding: 8px; }
   [hidden] { display: none !important; }
 </style>
 </head>
@@ -85,7 +88,38 @@
     <div class="muted">No password: this browser's cookie is the account. Clear your cookies and it is gone.</div>
   </section>
 
+  <section id="lobby-panel" hidden>
+    <h2>Lobby</h2>
+    <div class="row">
+      <button id="quickplay" class="primary">Quick Play</button>
+      <span class="muted">puts you at the public table with the most people that has room</span>
+    </div>
+    <div class="row" style="margin-top:8px">
+      <label>Private table
+        <select id="preset">
+          <option value="default">Default rules</option>
+          <option value="simple">Simple: no doubling, no ghanti</option>
+        </select>
+      </label>
+      <button id="create-private">Create Private Table</button>
+      <span class="grow"></span>
+      <label>Code <input id="code" maxlength="6" autocomplete="off" placeholder="6 letters"></label>
+      <button id="join-code">Join by Code</button>
+    </div>
+    <div id="lobby-error"></div>
+    <h2 style="margin-top:12px">Public tables</h2>
+    <table id="tables">
+      <thead><tr><th>Table</th><th>Humans</th><th>Bots</th><th>Chyakhe</th><th>Phase</th><th>Rules</th><th>Stake</th><th></th></tr></thead>
+      <tbody id="tables-body"></tbody>
+    </table>
+    <div id="no-tables" class="muted">No public tables yet. Quick Play makes one.</div>
+  </section>
+
   <section id="table-panel" hidden>
+    <div id="share" hidden>
+      Private table <strong id="share-code" class="mono"></strong>. Share this link:
+      <span id="share-url" class="mono"></span>
+    </div>
     <div class="row">
       <div class="grow">
         <strong id="phase">—</strong>
@@ -105,7 +139,7 @@
       <span id="topup-status" class="muted"></span>
       <button id="drop" title="Close the socket uncleanly and hold off reconnecting, to test the disconnect rules">Simulate drop</button>
       <button id="reconnect" hidden>Reconnect</button>
-      <button id="leave" title="Leave the table on purpose: no reconnect window">Leave</button>
+      <button id="leave" title="Leave the table on purpose and go back to the lobby: no reconnect window">Leave Table</button>
       <button id="logout" title="End this guest session. A new guest is a new account.">Logout</button>
     </div>
     <div id="error"></div>
@@ -151,8 +185,8 @@
   const MISS = "ति-र्यो";
   const REPLACED_CLOSE_CODE = 4100;
   const CONSENTED_CLOSE_CODE = 4000;
-  // Only a convenience: which room to rejoin. Identity is the session cookie.
-  const KEY = { room: "kauda.dev.roomId" };
+  const MOVED_CLOSE_CODE = 4101;
+  const SESSION_ENDED_CLOSE_CODE = 4102;
   const PANELS = ["table-panel", "seats-panel", "throw-panel", "fair-panel", "log-panel"];
   const SIGNUP_ERRORS = {
     "bad-name": "That name is not allowed: 3 to 20 letters (Latin or Devanagari), digits, spaces, _ or -.",
@@ -160,13 +194,19 @@
     "too-many-guests": "Too many new guests from this address. Try again later.",
     malformed: "Something went wrong with the request.",
   };
+  const LOBBY_ERRORS = {
+    "not-found": "No table with that code.",
+    "too-many-guesses": "Too many code guesses. Wait a few minutes and try again.",
+    "too-many-tables": "Too many private tables created. Try again later.",
+    "table-full": "That table is full.",
+    "still-leaving-previous-table": "Still finishing your round at the other table. Try again in a moment.",
+    "table-paused": "That table is paused.",
+    "no-session": "Your session has ended. Sign in again.",
+  };
   const LOG_LIMIT = 200;
 
   // ------------------------------------------------------------ helpers
   const $ = (id) => document.getElementById(id);
-  const load = (k) => { try { return localStorage.getItem(k); } catch { return null; } };
-  const save = (k, v) => { try { localStorage.setItem(k, v); } catch { /* private mode: still works for this tab */ } };
-  const forget = (k) => { try { localStorage.removeItem(k); } catch { /* ignore */ } };
   const hex = (bytes) => Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
 
   /** Builds an element. Text only ever goes in through textContent. */
@@ -235,6 +275,8 @@
     logged: 0,
     widget: null,        // the Turnstile widget id
     turnstileToken: null,
+    lobbyTimer: null,    // polls GET /tables while the lobby shows
+    pendingCode: null,   // a ?code= from the URL, used once signed in
   };
 
   const myId = () => state.me?.playerId ?? null;
@@ -262,26 +304,40 @@
     $("reconnect").hidden = !(conn === "dropped" || conn === "disconnected" || conn === "replaced");
   }
 
-  async function connect() {
+  /**
+   * Takes a seat: asks the server for one (it reserves it for this session's
+   * account), then connects with the reservation. No token and no name: who
+   * we are comes from the session cookie on the WebSocket upgrade.
+   * Returns the server's error code, or null on success.
+   */
+  async function takeSeat(path, body) {
     clearTimeout(state.retryTimer);
     state.replaced = false;
     if (state.conn !== "reconnecting") setConn("connecting");
-    state.client ??= new Colyseus.Client(location.origin);
-    // No token and no name: who we are comes from the session cookie on the
-    // WebSocket upgrade, which the server reads itself.
-    const options = {};
-    let room = null;
-    const last = load(KEY.room);
-    // The same room first, so a refresh lands back in the same seat.
-    if (last !== null) {
-      try { room = await state.client.joinById(last, options); } catch { room = null; }
+    const res = await api("POST", path, body);
+    if (res.status !== 200 && res.status !== 201) {
+      if (state.conn === "connecting") setConn("idle");
+      return (res.json && res.json.error) || `error-${res.status}`;
     }
-    if (room === null) room = await state.client.joinOrCreate("kauda", options);
-    attach(room);
+    state.client ??= new Colyseus.Client(location.origin);
+    const room = await state.client.consumeSeatReservation(res.json.reservation);
+    attach(room, res.json.code ?? null, res.json.shareUrl ?? null);
+    return null;
   }
 
-  function attach(room) {
+  /** Back to the table this account is at, if any (after a refresh or a drop). */
+  function connect() {
+    return takeSeat("/tables/rejoin", {}).then((error) => {
+      if (error !== null) throw new Error(error);
+    });
+  }
+
+  function attach(room, code, shareUrl) {
     state.room = room;
+    stopLobby();
+    $("share").hidden = code === null;
+    setText("share-code", code ?? "");
+    setText("share-url", shareUrl ?? `${location.origin}/?code=${code ?? ""}`);
     // The server resumes a player by their session, not by Colyseus
     // reconnection tokens, so the SDK's own reconnect loop is off; ours is below.
     if (room.reconnection) room.reconnection.enabled = false;
@@ -295,8 +351,8 @@
       setConn("paused", "Table paused: " + String(m && m.reason) + ". Chips are as saved before the failure. Leave and join again to play on.");
     });
     room.onLeave((code) => onLeave(room, code));
+    room.onMessage("ended", () => {});
     room.send("sync");
-    save(KEY.room, room.roomId);
     state.retry = 0;
     setConn("connected");
     $("join-panel").hidden = true;
@@ -304,23 +360,82 @@
   }
 
   // ------------------------------------------------------------ session
-  /** On load: with a session, play straight away; without one, sign up. */
+  /** On load: with a session, go on; without one, sign up first. */
   async function boot() {
+    const code = new URLSearchParams(location.search).get("code");
+    if (code) {
+      state.pendingCode = code;
+      // Used once: a refresh should not keep re-joining by code.
+      history.replaceState(null, "", location.pathname);
+    }
     const me = await api("GET", "/session/me");
-    if (me.status === 200) join();
+    if (me.status === 200) afterSignIn();
     else showSignup();
   }
 
-  function join() {
-    connect().catch((e) => {
-      const message = String(e && e.message ? e.message : e);
-      // No valid session (expired, revoked): back to signing up.
-      if (/identity/i.test(message)) return void showSignup();
-      setConn("disconnected", "Could not join: " + message);
+  /** Signed in: a shared link's table, else the table we are at, else the lobby. */
+  async function afterSignIn() {
+    $("join-panel").hidden = true;
+    const code = state.pendingCode;
+    state.pendingCode = null;
+    if (code) {
+      const error = await takeSeat("/tables/join", { code }).catch((e) => String(e && e.message));
+      if (error === null) return;
+      showLobby(LOBBY_ERRORS[error] ?? `Could not join that table (${error}).`);
+      return;
+    }
+    const error = await takeSeat("/tables/rejoin", {}).catch((e) => String(e && e.message));
+    if (error === null) return;
+    if (error === "no-session") return void showSignup();
+    showLobby();
+  }
+
+  // ------------------------------------------------------------ lobby
+  function showLobby(message) {
+    $("join-panel").hidden = true;
+    for (const id of PANELS) $(id).hidden = true;
+    $("lobby-panel").hidden = false;
+    setText("lobby-error", message ?? "");
+    void refreshTables();
+    clearInterval(state.lobbyTimer);
+    state.lobbyTimer = setInterval(() => void refreshTables(), 3000);
+  }
+
+  function stopLobby() {
+    clearInterval(state.lobbyTimer);
+    state.lobbyTimer = null;
+    $("lobby-panel").hidden = true;
+  }
+
+  async function refreshTables() {
+    const res = await api("GET", "/tables");
+    const tables = (res.json && res.json.tables) || [];
+    const rows = tables.map((t) => {
+      const tr = el("tr");
+      const cells = [t.id, t.humans, t.bots, t.chyakhe, t.phase, t.preset, t.stake];
+      for (const value of cells) tr.append(el("td", "", value));
+      const join = el("button", "", t.room > 0 ? "Join" : "Full");
+      join.disabled = t.room <= 0;
+      join.addEventListener("click", () => void lobbyAction("/tables/public/join", { tableId: t.id }));
+      const td = el("td");
+      td.append(join);
+      tr.append(td);
+      return tr;
     });
+    $("tables-body").replaceChildren(...rows);
+    $("no-tables").hidden = tables.length > 0;
+  }
+
+  async function lobbyAction(path, body) {
+    setText("lobby-error", "");
+    const error = await takeSeat(path, body).catch((e) => String(e && e.message));
+    if (error === null) return;
+    if (error === "no-session") return void showSignup();
+    setText("lobby-error", LOBBY_ERRORS[error] ?? `Something went wrong (${error}).`);
   }
 
   async function showSignup() {
+    stopLobby();
     $("join-panel").hidden = false;
     for (const id of PANELS) $(id).hidden = true;
     $("join").disabled = true;
@@ -348,7 +463,7 @@
     $("join").disabled = true;
     setText("signup-error", "");
     const res = await api("POST", "/session/guest", { name: $("name").value, turnstileToken: state.turnstileToken ?? "" });
-    if (res.status === 201) return void join();
+    if (res.status === 201) return void afterSignIn();
     const code = res.json && res.json.error;
     setText("signup-error", SIGNUP_ERRORS[code] ?? `Could not create a guest (${res.status}).`);
     // A Turnstile token is good once: get a fresh one before trying again.
@@ -357,10 +472,10 @@
   }
 
   async function logout() {
-    forget(KEY.room);
     const room = state.room;
     state.room = null; // so its leave is not treated as a drop
     if (room) await room.leave(true); // off the table on purpose first
+    // The server also ends every other connection of this account at once.
     await api("POST", "/session/logout", {});
     state.me = null;
     state.view = null;
@@ -378,7 +493,14 @@
     if (state.replaced || code === REPLACED_CLOSE_CODE) {
       setConn("replaced", "Another tab or window took over this player. Click Reconnect to take it back.");
     } else if (code === CONSENTED_CLOSE_CODE) {
-      setConn("disconnected", "You left the table.");
+      setConn("idle");
+      showLobby(); // Leave Table
+    } else if (code === MOVED_CLOSE_CODE) {
+      setConn("idle", "This player joined another table, in another tab or window.");
+      showLobby();
+    } else if (code === SESSION_ENDED_CLOSE_CODE) {
+      setConn("idle", "This session was logged out.");
+      showSignup();
     } else if (state.holdDrop) {
       setConn("dropped", "Connection dropped (simulated). Your seat is held for 3 rounds or 60 s. Click Reconnect.");
     } else {
@@ -392,7 +514,13 @@
     const delay = Math.min(1000 * 2 ** (state.retry - 1), 8000);
     setConn("reconnecting", `Connection lost. Reconnecting (attempt ${state.retry}, in ${delay / 1000}s)…`);
     state.retryTimer = setTimeout(() => {
-      connect().catch(() => scheduleReconnect());
+      connect().catch((e) => {
+        const error = String(e && e.message);
+        if (error === "no-session") return void showSignup();
+        // Our window at that table is over: back to the lobby.
+        if (error === "not-at-a-table") return void showLobby("Your seat was given up while you were away.");
+        scheduleReconnect();
+      });
     }, delay);
   }
 
@@ -655,16 +783,24 @@
   $("reconnect").addEventListener("click", () => {
     state.holdDrop = false;
     state.retry = 0;
-    connect().catch(() => scheduleReconnect());
+    connect().catch((e) => {
+      const error = String(e && e.message);
+      if (error === "no-session") return void showSignup();
+      if (error === "not-at-a-table") return void showLobby("Your seat was given up while you were away.");
+      scheduleReconnect();
+    });
   });
   $("leave").addEventListener("click", () => {
-    forget(KEY.room);
-    if (state.room) state.room.leave(true);
+    if (state.room) state.room.leave(true); // consented: back to the lobby
   });
+  $("quickplay").addEventListener("click", () => void lobbyAction("/tables/quickplay", {}));
+  $("create-private").addEventListener("click", () => void lobbyAction("/tables/private", { preset: $("preset").value }));
+  $("join-code").addEventListener("click", () => void lobbyAction("/tables/join", { code: $("code").value }));
   setInterval(renderClock, 100);
   setConn("idle");
 
-  // A refresh brings a player with a session straight back: same cookie, same room.
+  // A refresh brings a player with a session straight back: same cookie, and
+  // the server knows which table they are at.
   void boot();
 })();
 </script>

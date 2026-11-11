@@ -202,8 +202,8 @@ describe("debug client page", () => {
   };
 
   /** Loads the real page from the dev server, as a browser would, sharing a cookie jar. */
-  async function openPage(cookieJar: CookieJar): Promise<JSDOM> {
-    const dom = await JSDOM.fromURL(own() + "/", {
+  async function openPage(cookieJar: CookieJar, path = "/"): Promise<JSDOM> {
+    const dom = await JSDOM.fromURL(own() + path, {
       runScripts: "dangerously",
       resources: { interceptors: [interceptor, browserOrigin] } as unknown as "usable",
       cookieJar,
@@ -230,6 +230,18 @@ describe("debug client page", () => {
     await until(() => !join.disabled, "the Turnstile widget to pass");
     (doc.getElementById("name") as HTMLInputElement).value = name;
     join.click();
+    await until(
+      () => doc.getElementById("lobby-panel")?.hidden === false || text(dom, "conn") === "connected",
+      "the lobby, or the table a shared link names",
+    );
+  }
+
+  const click = (dom: JSDOM, id: string) => (dom.window.document.getElementById(id) as HTMLButtonElement).click();
+
+  /** From the lobby, Quick Play, and wait to be at the table. */
+  async function quickPlay(dom: JSDOM): Promise<void> {
+    await until(() => dom.window.document.getElementById("lobby-panel")?.hidden === false, "the lobby");
+    click(dom, "quickplay");
     await until(() => text(dom, "conn") === "connected", "the page to connect");
   }
 
@@ -238,6 +250,7 @@ describe("debug client page", () => {
     const dom = await openPage(jar);
     const doc = dom.window.document;
     await signUp(dom, "हरि Test");
+    await quickPlay(dom);
     // The session cookie is httpOnly: in the jar, invisible to the page.
     expect(jar.getCookieStringSync(own())).toMatch(/kauda_session=/);
     expect(doc.cookie).toBe("");
@@ -293,6 +306,7 @@ describe("debug client page", () => {
     await until(() => again.window.document.getElementById("join-panel")?.hidden === false, "the sign-up form after logout");
     expect(jar.getCookieStringSync(own())).not.toMatch(/kauda_session=/);
     await signUp(again, "Sita New");
+    await quickPlay(again);
     await until(() => text(again, "me-name") === "Sita New", "the new guest's name");
     await until(() => text(again, "me-chips") === "2000", "the new guest's buy-in");
     expect(text(again, "me-where")).toBe("chyakhe");
@@ -304,5 +318,43 @@ describe("debug client page", () => {
 
     dom.window.close();
     again.window.close();
+  }, 60_000);
+
+  it("creates a private table whose share link takes a friend straight to it, and Leave Table returns to the lobby", async () => {
+    const host = await openPage(new CookieJar());
+    await signUp(host, "Host One");
+    (host.window.document.getElementById("preset") as HTMLSelectElement).value = "simple";
+    click(host, "create-private");
+    await until(() => text(host, "conn") === "connected", "the host at the private table");
+    await until(() => host.window.document.getElementById("share")?.hidden === false, "the share link");
+    const code = text(host, "share-code");
+    expect(code).toMatch(/^[A-HJ-NP-Z2-9]{6}$/);
+    expect(text(host, "share-url")).toBe(`${own()}/?code=${code}`);
+    // The lobby never lists it (other tests' public tables may well be there).
+    const privateId = dev.directory.byCode(code)?.roomId;
+    expect(privateId).toBeDefined();
+    const listed = ((await (await fetch(`${own()}/tables`)).json()) as { tables: { id: string }[] }).tables;
+    expect(listed.map((x) => x.id)).not.toContain(privateId);
+
+    // A friend opens the link, signs up, and lands at that table with no lobby in between.
+    const friend = await openPage(new CookieJar(), `/?code=${code}`);
+    await signUp(friend, "Friend Two");
+    await until(() => text(friend, "conn") === "connected", "the friend at the table");
+    expect(text(friend, "share-code")).toBe(code);
+    expect(friend.window.location.search).toBe(""); // the code is used once, not kept in the address
+    // Same table: the server has both of them at the table behind the code.
+    const names = () => {
+      const v = dev.directory.byCode(code)?.table.view();
+      return v === undefined ? [] : [...Object.values(v.seats), ...v.chyakhe].flatMap((p) => (p === null ? [] : [p.name]));
+    };
+    await until(() => names().includes("Friend Two") && names().includes("Host One"), "both at the private table");
+
+    // Leave Table: back to the lobby, off the table.
+    click(friend, "leave");
+    await until(() => friend.window.document.getElementById("lobby-panel")?.hidden === false, "the friend's lobby");
+    expect(friend.window.document.getElementById("table-panel")?.hidden).toBe(true);
+
+    host.window.close();
+    friend.window.close();
   }, 60_000);
 });

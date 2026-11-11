@@ -2,6 +2,7 @@ import { z } from "zod";
 import { eq } from "drizzle-orm";
 import { accounts } from "../db/schema.js";
 import type { KaudaDb } from "../db/store.js";
+import { NO_STORE as noStore, header, readJsonBody, stateChangeAllowed, type RouteApp } from "../httpRoutes.js";
 import { normaliseDisplayName, type IdentityResolver } from "../identity.js";
 import type { RateLimiter } from "./rateLimit.js";
 import type { Sessions } from "./sessions.js";
@@ -24,62 +25,6 @@ import type { TurnstileVerifier } from "./turnstile.js";
  * here logs one.
  */
 
-/** The parts of an Express request and response these routes use. */
-interface Req {
-  readonly method: string;
-  readonly headers: Readonly<Record<string, string | string[] | undefined>>;
-  readonly body?: unknown;
-  readonly socket: { readonly remoteAddress?: string | undefined };
-  on(event: "data", listener: (chunk: Buffer) => void): unknown;
-  on(event: "end" | "error", listener: () => void): unknown;
-  destroy(): unknown;
-}
-
-/** The whole JSON body, at most 4 KB. Null if it is too big or not JSON. */
-const MAX_BODY_BYTES = 4 * 1024;
-function readJsonBody(req: Req): Promise<unknown> {
-  if (req.body !== undefined) return Promise.resolve(req.body); // already read by a framework
-  return new Promise((resolve) => {
-    const chunks: Buffer[] = [];
-    let size = 0;
-    let done = false;
-    const finish = (value: unknown) => {
-      if (!done) {
-        done = true;
-        resolve(value);
-      }
-    };
-    req.on("data", (chunk) => {
-      size += chunk.length;
-      if (size > MAX_BODY_BYTES) {
-        finish(null);
-        req.destroy();
-        return;
-      }
-      chunks.push(chunk);
-    });
-    req.on("end", () => {
-      try {
-        finish(JSON.parse(Buffer.concat(chunks).toString("utf8")));
-      } catch {
-        finish(null);
-      }
-    });
-    req.on("error", () => finish(null));
-  });
-}
-interface Res {
-  status(code: number): Res;
-  set(headers: Record<string, string>): Res;
-  json(body: unknown): void;
-  end(): void;
-}
-type Handler = (req: Req, res: Res) => void | Promise<void>;
-export interface RouteApp {
-  get(path: string, handler: Handler): unknown;
-  post(path: string, handler: Handler): unknown;
-}
-
 export interface SessionRouteDeps {
   readonly db: KaudaDb;
   readonly sessions: Sessions;
@@ -91,6 +36,8 @@ export interface SessionRouteDeps {
   readonly buyIn: number;
   /** Origins allowed to make state-changing requests. */
   allowedOrigins(): readonly string[];
+  /** Called after a logout, with the account: its table connections must end now. */
+  onLogout?(accountId: string): void;
 }
 
 const GuestBody = z.strictObject({
@@ -98,31 +45,10 @@ const GuestBody = z.strictObject({
   turnstileToken: z.string().min(1).max(2048),
 });
 
-const header = (req: Req, name: string): string | undefined => {
-  const v = req.headers[name];
-  return Array.isArray(v) ? v[0] : v;
-};
-
 export function mountSessionRoutes(app: RouteApp, deps: SessionRouteDeps): void {
-  const noStore = { "Cache-Control": "no-store" };
-
   const balanceOf = async (accountId: string): Promise<number> => {
     const [row] = await deps.db.select({ balance: accounts.balance }).from(accounts).where(eq(accounts.id, accountId));
     return row?.balance ?? 0;
-  };
-
-  /** Origin on the allowlist, and a JSON body. Answers and returns false if not. */
-  const stateChangeAllowed = (req: Req, res: Res): boolean => {
-    const origin = header(req, "origin");
-    if (origin === undefined || !deps.allowedOrigins().includes(origin)) {
-      res.status(403).set(noStore).json({ error: "bad-origin" });
-      return false;
-    }
-    if (!(header(req, "content-type") ?? "").toLowerCase().startsWith("application/json")) {
-      res.status(415).set(noStore).json({ error: "json-only" });
-      return false;
-    }
-    return true;
   };
 
   app.get("/session/config", (_req, res) => {
@@ -139,7 +65,7 @@ export function mountSessionRoutes(app: RouteApp, deps: SessionRouteDeps): void 
   });
 
   app.post("/session/guest", async (req, res) => {
-    if (!stateChangeAllowed(req, res)) return;
+    if (!stateChangeAllowed(req, res, deps.allowedOrigins())) return;
     if (!deps.guestLimiter.take(req.socket.remoteAddress ?? "unknown")) {
       return void res.status(429).set(noStore).json({ error: "too-many-guests" });
     }
@@ -159,9 +85,11 @@ export function mountSessionRoutes(app: RouteApp, deps: SessionRouteDeps): void 
   });
 
   app.post("/session/logout", async (req, res) => {
-    if (!stateChangeAllowed(req, res)) return;
+    if (!stateChangeAllowed(req, res, deps.allowedOrigins())) return;
     await readJsonBody(req); // drain it; logout takes no fields
-    await deps.sessions.revoke(header(req, "cookie"));
+    const accountId = await deps.sessions.revoke(header(req, "cookie"));
+    // A revoked session must not keep playing: end its table connections now.
+    if (accountId !== null) deps.onLogout?.(accountId);
     res.status(204).set({ ...noStore, "Set-Cookie": deps.sessions.clearCookie() }).end();
   });
 }

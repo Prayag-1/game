@@ -370,6 +370,22 @@ export class Table {
     return this.#players.has(playerId);
   }
 
+  /**
+   * How many more humans could join right now. A newcomer is unseated, and
+   * there are at most MAX_UNSEATED unseated players, though a joining human
+   * may displace an idle chyakhe bot (one with no bet down). The same rule
+   * join() applies, read without changing anything.
+   */
+  humanCapacity(): number {
+    let seated = 0;
+    for (const s of TURN_ORDER) if (this.#seats[s] !== undefined) seated += 1;
+    let idleBots = 0;
+    for (const p of this.#players.values()) {
+      if (p.isBot && !p.leaving && this.seatOf(p.id) === null && !this.#bets.has(p.id)) idleBots += 1;
+    }
+    return Math.max(0, MAX_UNSEATED - (this.#players.size - seated)) + idleBots;
+  }
+
   view(): TableView {
     const playerView = (id: string): PlayerView | null => {
       const p = this.#players.get(id);

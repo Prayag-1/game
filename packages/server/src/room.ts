@@ -1,10 +1,13 @@
 import { CloseCode, ErrorCode, Room, ServerError, type AuthContext, type Client } from "@colyseus/core";
+import { DEFAULT_HOUSE_RULES, SIMPLE_HOUSE_RULES, type HouseRules } from "@kauda/rules";
+import { z } from "zod";
 import { isValidPlayerId, parseCommand } from "./commands.js";
 import { TablePersistence } from "./db/persistence.js";
 import type { ChipStore } from "./db/store.js";
 import type { CommitmentFactory } from "./fairness.js";
 import type { Identity, IdentityResolver } from "./identity.js";
 import { Ledger, MINT_ACCOUNT } from "./ledger.js";
+import type { Preset, TableDirectory, Visibility } from "./lobby/directory.js";
 import { MAX_PLAYERS, Table, type TableOptions } from "./table.js";
 
 /**
@@ -71,6 +74,31 @@ export const DEFAULT_RECONNECT_WINDOW: ReconnectWindow = { rounds: 3, ms: 60_000
 export const DEFAULT_TICK_MS = 200;
 /** Close code for a connection replaced by a newer one for the same player. */
 export const REPLACED_CLOSE_CODE = 4100;
+/** Close code for a connection ended because its player went to another table. */
+export const MOVED_CLOSE_CODE = 4101;
+/** Close code for a connection ended because its session was logged out. */
+export const SESSION_ENDED_CLOSE_CODE = 4102;
+
+/** A table with no humans is disposed after this long: public, and private. */
+export const DEFAULT_EMPTY_TIMEOUT_MS = { public: 2 * 60_000, private: 10 * 60_000 } as const;
+
+/**
+ * What a table is made with. Set only by the server (TableDirectory): the
+ * client matchmaking routes are off, so no client can choose these.
+ */
+const CreateOptions = z
+  .object({
+    visibility: z.enum(["public", "private"]).default("public"),
+    preset: z.enum(["default", "simple"]).default("default"),
+  })
+  .strip();
+
+/** "simple": doubling off and no ghanti, on top of whatever rules the table has. */
+export function presetRules(base: HouseRules, preset: Preset): HouseRules {
+  return preset === "simple"
+    ? { ...base, doubling: SIMPLE_HOUSE_RULES.doubling, maxStakeMultiplier: SIMPLE_HOUSE_RULES.maxStakeMultiplier, ghantiChips: 0 }
+    : base;
+}
 
 export interface KaudaRoomDeps {
   readonly identity: IdentityResolver;
@@ -95,6 +123,10 @@ export interface KaudaRoomDeps {
   readonly tickMs?: number;
   readonly reconnectWindow?: ReconnectWindow;
   readonly maxMessagesPerSecond?: number;
+  /** The lobby: lists this table and finds it by code. */
+  readonly directory?: TableDirectory;
+  /** How long a table may have no humans before it is disposed. */
+  readonly emptyTimeoutMs?: { readonly public?: number; readonly private?: number };
 }
 
 interface ResolvedDeps extends KaudaRoomDeps {
@@ -138,19 +170,29 @@ export class KaudaRoom extends Room {
   #lastView = "";
   #roundsSent = 0;
   #paused: string | null = null;
+  /** When the table last became empty of humans, or null while it has some. */
+  #emptySince: number | null = null;
+  visibility: Visibility = "public";
+  preset: Preset = "default";
 
-  override onCreate(): void {
+  override onCreate(options: unknown): void {
     const deps = this.deps;
     if (deps === undefined) throw new Error("register the room with defineKaudaRoom(deps)");
+    const created = CreateOptions.parse(options ?? {});
+    this.visibility = created.visibility;
+    this.preset = created.preset;
     this.maxClients = MAX_PLAYERS;
     this.patchRate = null; // no Schema state to patch
-    this.autoDispose = true;
+    // Disposal is ours: after a while with no humans (see #disposeIfEmpty),
+    // not the moment the last connection closes, so a table outlives a
+    // reconnect window and a private table waits for its friends.
+    this.autoDispose = false;
     this.maxMessagesPerSecond = deps.maxMessagesPerSecond ?? 20;
     this.#now = deps.now ?? Date.now;
     this.#window = deps.reconnectWindow ?? DEFAULT_RECONNECT_WINDOW;
 
     this.table = new Table(
-      { ...deps.table, tableId: this.roomId },
+      { ...deps.table, rules: presetRules(deps.table?.rules ?? DEFAULT_HOUSE_RULES, this.preset), tableId: this.roomId },
       {
         now: this.#now,
         // With a database, this table's own cache; the database is what is shared.
@@ -216,6 +258,7 @@ export class KaudaRoom extends Room {
     this.onMessage("*", (client) => client.send("error", "unknown-message"));
 
     this.setSimulationInterval(() => this.#step(), deps.tickMs ?? DEFAULT_TICK_MS);
+    deps.directory?.register(this);
   }
 
   /**
@@ -223,12 +266,18 @@ export class KaudaRoom extends Room {
    * (the session cookie rides along because the page and the socket share
    * one origin); the client's join options are never read.
    */
-  override async onAuth(_client: Client, _options: unknown, context: AuthContext): Promise<Identity> {
+  override async onAuth(_client: Client, options: unknown, context: AuthContext): Promise<Identity> {
     const deps = this.deps;
     if (deps === undefined) throw new ServerError(ErrorCode.AUTH_FAILED, "room not configured");
     const identity = await deps.identity.resolveIdentity({ headers: context.headers, ip: context.ip });
     if (identity === null || !isValidPlayerId(identity.playerId) || identity.playerId === MINT_ACCOUNT) {
       throw new ServerError(ErrorCode.AUTH_FAILED, "unknown identity");
+    }
+    // A seat the server reserved for an account can be taken by that account
+    // only. (These options come from the server's reservation, not a client.)
+    const reservedFor = options !== null && typeof options === "object" ? (options as { accountId?: unknown }).accountId : undefined;
+    if (reservedFor !== undefined && reservedFor !== identity.playerId) {
+      throw new ServerError(ErrorCode.AUTH_FAILED, "seat reserved for another account");
     }
     return identity;
   }
@@ -270,7 +319,7 @@ export class KaudaRoom extends Room {
     this.#playerBySession.set(client.sessionId, playerId);
     this.#clientByPlayer.set(playerId, client);
     this.#away.delete(playerId);
-    this.#syncAutoDispose();
+    deps.directory?.joined(this.roomId, playerId);
 
     client.send("welcome", this.#welcome(playerId, name));
     if (!this.#changed()) client.send("view", this.table.view());
@@ -289,11 +338,32 @@ export class KaudaRoom extends Room {
       this.table.setConnected(playerId, false);
       this.#away.set(playerId, { since: this.#now(), roundsAtDrop: this.table.roundCount });
     }
-    this.#syncAutoDispose();
+    this.#changed();
+  }
+
+  /**
+   * Ends this account's connection here at once and takes it off the table
+   * with the same semantics as a voluntary leave: a seat with chips in the
+   * round is held until the round settles, then freed. Used when the player
+   * goes to another table, and when their session is logged out (a revoked
+   * session must not keep playing).
+   */
+  evict(playerId: string, why: "moved" | "logged-out"): void {
+    const client = this.#clientByPlayer.get(playerId);
+    if (client !== undefined) {
+      // Forget it first, so its onLeave does not count as a disconnect.
+      this.#playerBySession.delete(client.sessionId);
+      this.#clientByPlayer.delete(playerId);
+      client.send("ended", { reason: why });
+      client.leave(why === "moved" ? MOVED_CLOSE_CODE : SESSION_ENDED_CLOSE_CODE, why);
+    }
+    this.#away.delete(playerId);
+    if (this.#paused === null && this.table.hasPlayer(playerId)) this.table.handle(playerId, { type: "leave" });
     this.#changed();
   }
 
   override async onDispose(): Promise<void> {
+    this.deps?.directory?.unregister(this);
     // Whatever is queued is written before the table goes.
     await this.persistence?.idle();
     for (const [playerId, roomId] of this.deps?.atTable ?? []) {
@@ -322,10 +392,16 @@ export class KaudaRoom extends Room {
     return this.#paused;
   }
 
+  /** When the table last became empty of humans (table clock), or null while it has some. */
+  get emptySince(): number | null {
+    return this.#emptySince;
+  }
+
   // ------------------------------------------------------------------ loop
 
   #step(): void {
     if (this.#paused !== null) return;
+    if (this.#disposeIfEmpty()) return;
     // Never run ahead of the database: wait for pending writes.
     if (this.persistence !== null && this.persistence.pending > 0) return;
     try {
@@ -356,7 +432,30 @@ export class KaudaRoom extends Room {
       this.table.handle(playerId, { type: "leave" });
       this.#away.delete(playerId);
     }
-    this.#syncAutoDispose();
+  }
+
+  /**
+   * Disposes the table once it has had no humans (connected, away within
+   * their window, or still settling) for its timeout: 2 minutes public, 10
+   * private. Bots alone never keep a table going. Returns true if disposing.
+   */
+  #disposeIfEmpty(): boolean {
+    const v = this.table.view();
+    const humans =
+      this.clients.length > 0 ||
+      this.#away.size > 0 ||
+      [...Object.values(v.seats), ...v.chyakhe].some((p) => p !== null && !p.isBot);
+    if (humans) {
+      this.#emptySince = null;
+      return false;
+    }
+    const now = this.#now();
+    this.#emptySince ??= now;
+    const limits = { ...DEFAULT_EMPTY_TIMEOUT_MS, ...this.deps?.emptyTimeoutMs };
+    if (now - this.#emptySince < limits[this.visibility]) return false;
+    this.setSimulationInterval(undefined);
+    void this.disconnect();
+    return true;
   }
 
   /** After anything happened: queue it for the database, send settled rounds, publish the view. */
@@ -412,6 +511,7 @@ export class KaudaRoom extends Room {
     this.broadcast("paused", { reason: why });
     this.broadcast("error", "table-paused");
     void this.lock();
+    this.autoDispose = true; // a paused table is done: gone when its last client leaves
     // Nothing more is written here, so the players are free to go elsewhere.
     for (const [playerId, roomId] of this.deps?.atTable ?? []) {
       if (roomId === this.roomId) this.deps?.atTable.delete(playerId);
@@ -427,8 +527,4 @@ export class KaudaRoom extends Room {
     }
   }
 
-  /** While anyone is inside a reconnect window, the room must outlive its last client. */
-  #syncAutoDispose(): void {
-    this.autoDispose = this.#away.size === 0;
-  }
 }

@@ -14,6 +14,7 @@ export default defineConfig({
       ["**/test/room.test.ts", "threads"],
       ["**/test/devserver.test.ts", "threads"],
       ["**/test/auth.test.ts", "threads"],
+      ["**/test/lobby.test.ts", "threads"],
     ],
   },
 });
