@@ -1,0 +1,572 @@
+<!doctype html>
+<!--
+  KAUDA DEVELOPER DEBUG CLIENT.
+  NO REAL AUTHENTICATION: the player is whoever holds the random token kept in
+  this browser's localStorage. It must never be exposed to a network. It is
+  served only by the dev server on 127.0.0.1 (pnpm dev).
+
+  Rules for this file: anything that came from the server reaches the page
+  through textContent or a text node, never through HTML parsing. No
+  framework, no bundler; the Colyseus SDK is served from /vendor.
+-->
+<html lang="ne">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kauda debug client</title>
+<style>
+  :root { --ink: #1d1d1f; --muted: #6b6b70; --line: #d6d6db; --bg: #f6f6f8; --card: #fff;
+          --accent: #7a2e0e; --ok: #13795b; --bad: #b3261e; --warn: #8a5a00; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 14px/1.4 system-ui, "Noto Sans Devanagari", sans-serif; color: var(--ink); background: var(--bg); }
+  header { display: flex; gap: 12px; align-items: center; padding: 8px 16px; background: var(--card); border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+  header h1 { font-size: 16px; margin: 0 8px 0 0; }
+  main { padding: 12px 16px; display: grid; gap: 12px; max-width: 1100px; }
+  section { background: var(--card); border: 1px solid var(--line); border-radius: 6px; padding: 10px 12px; }
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 0 0 8px; }
+  button { font: inherit; padding: 4px 10px; border: 1px solid #999; border-radius: 4px; background: #fff; cursor: pointer; }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  input { font: inherit; padding: 3px 6px; border: 1px solid #999; border-radius: 4px; }
+  input[type=number] { width: 80px; }
+  .dev-warning { color: var(--bad); font-weight: 600; }
+  .pill { padding: 1px 8px; border-radius: 999px; border: 1px solid var(--line); font-size: 12px; }
+  .pill.connected { background: #e3f4ec; border-color: var(--ok); color: var(--ok); }
+  .pill.reconnecting, .pill.connecting { background: #fff4dc; border-color: var(--warn); color: var(--warn); }
+  .pill.disconnected, .pill.replaced, .pill.dropped { background: #fbe4e2; border-color: var(--bad); color: var(--bad); }
+  #banner { padding: 8px 16px; background: #fff4dc; border-bottom: 1px solid var(--warn); color: var(--warn); font-weight: 600; }
+  #banner.bad { background: #fbe4e2; border-color: var(--bad); color: var(--bad); }
+  .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .grow { flex: 1; }
+  #seats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+  @media (max-width: 760px) { #seats { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+  .seat { border: 1px solid var(--line); border-radius: 6px; padding: 8px; display: grid; gap: 4px; align-content: start; min-height: 150px; }
+  .seat.thrower { border: 2px solid var(--accent); }
+  .seat.mine { background: #fdf3ee; }
+  .seat .title { display: flex; justify-content: space-between; font-weight: 600; }
+  .seat .title .ne { font-size: 18px; }
+  .seat .num { color: var(--muted); }
+  .tag { font-size: 11px; padding: 0 5px; border-radius: 3px; background: #ececf0; color: var(--muted); margin-left: 4px; }
+  .tag.you { background: var(--accent); color: #fff; }
+  .tag.off { background: #fbe4e2; color: var(--bad); }
+  .throw-mark { color: var(--accent); font-weight: 600; }
+  .muted { color: var(--muted); }
+  #shells { display: grid; grid-template-columns: repeat(16, 22px); gap: 6px; margin: 6px 0; }
+  .shell { width: 22px; height: 22px; border-radius: 50%; border: 2px solid var(--accent); }
+  .shell.up { background: var(--accent); }
+  .mono { font-family: ui-monospace, Consolas, monospace; font-size: 12px; word-break: break-all; }
+  .ok { color: var(--ok); font-weight: 700; }
+  .bad { color: var(--bad); font-weight: 700; }
+  #log { list-style: none; padding: 0; margin: 0; max-height: 320px; overflow-y: auto; display: grid; gap: 4px; }
+  #log li { border-bottom: 1px dashed var(--line); padding-bottom: 4px; }
+  #error { color: var(--bad); min-height: 1.4em; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Kauda debug client</h1>
+  <span class="pill" id="conn">idle</span>
+  <span class="dev-warning">DEV ONLY · no real authentication · never expose to a network</span>
+</header>
+<div id="banner" hidden></div>
+<main>
+  <section id="join-panel">
+    <h2>Join</h2>
+    <div class="row">
+      <label>Name <input id="name" maxlength="20" autocomplete="off" placeholder="3–20 letters"></label>
+      <button id="join" class="primary">Join</button>
+      <span class="muted">The name is used the first time this browser's token is seen.</span>
+    </div>
+  </section>
+
+  <section id="table-panel" hidden>
+    <div class="row">
+      <div class="grow">
+        <strong id="phase">—</strong>
+        <span id="countdown" class="muted"></span>
+        · <span id="round" class="muted"></span>
+        · <span id="stake"></span>
+      </div>
+      <div>Me: <strong id="me-name">—</strong> <span id="me-where" class="muted"></span> · chips <strong id="me-chips">—</strong></div>
+    </div>
+    <div class="row" style="margin-top:8px">
+      <button id="throw" class="primary" disabled>Throw</button>
+      <button id="stand" hidden>Stand</button>
+      <span id="my-bet" class="muted"></span>
+      <button id="clear-bet" hidden>Clear bet</button>
+      <span class="grow"></span>
+      <button id="topup" hidden>Top Up</button>
+      <span id="topup-status" class="muted"></span>
+      <button id="drop" title="Close the socket uncleanly and hold off reconnecting, to test the disconnect rules">Simulate drop</button>
+      <button id="reconnect" hidden>Reconnect</button>
+      <button id="leave" title="Leave the table on purpose: no reconnect window">Leave</button>
+    </div>
+    <div id="error"></div>
+  </section>
+
+  <section id="seats-panel" hidden>
+    <h2>Seats</h2>
+    <div id="seats"></div>
+  </section>
+
+  <section id="throw-panel" hidden>
+    <h2>Last throw</h2>
+    <div id="shells"></div>
+    <div id="throw-summary" class="muted">No throw yet.</div>
+  </section>
+
+  <section id="fair-panel" hidden>
+    <h2>Commit and reveal</h2>
+    <div id="commit-line"></div>
+    <div id="reveal-line"></div>
+  </section>
+
+  <section id="log-panel" hidden>
+    <h2>Settled rounds</h2>
+    <ol id="log"></ol>
+  </section>
+</main>
+
+<script src="/vendor/colyseus.js"></script>
+<script>
+"use strict";
+(() => {
+  // ------------------------------------------------------------ constants
+  const SEATS = [
+    { id: "teeya", ne: "तीया", n: 3 },
+    { id: "chauka", ne: "चौका", n: 4 },
+    { id: "panja", ne: "पञ्जा", n: 5 },
+    { id: "chakka", ne: "छक्का", n: 6 },
+  ];
+  const SEAT = Object.fromEntries(SEATS.map((s) => [s.id, s]));
+  const HIT = "मा-र्यो";
+  const MISS = "ति-र्यो";
+  const REPLACED_CLOSE_CODE = 4100;
+  const CONSENTED_CLOSE_CODE = 4000;
+  const KEY = { token: "kauda.dev.token", name: "kauda.dev.name", room: "kauda.dev.roomId", joined: "kauda.dev.joined" };
+  const LOG_LIMIT = 200;
+
+  // ------------------------------------------------------------ helpers
+  const $ = (id) => document.getElementById(id);
+  const load = (k) => { try { return localStorage.getItem(k); } catch { return null; } };
+  const save = (k, v) => { try { localStorage.setItem(k, v); } catch { /* private mode: still works for this tab */ } };
+  const forget = (k) => { try { localStorage.removeItem(k); } catch { /* ignore */ } };
+  const hex = (bytes) => Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+
+  /** Builds an element. Text only ever goes in through textContent. */
+  function el(tag, cls, text) {
+    const e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text !== undefined) e.textContent = String(text);
+    return e;
+  }
+  function setText(id, text) { $(id).textContent = text; }
+
+  /** This browser's dev token: 32 random bytes, made once and kept. */
+  function token() {
+    let t = load(KEY.token);
+    if (t === null || !/^dev-[0-9a-f]{64}$/.test(t)) {
+      t = "dev-" + hex(crypto.getRandomValues(new Uint8Array(32)));
+      save(KEY.token, t);
+    }
+    return t;
+  }
+
+  async function sha256Hex(bytes) {
+    return hex(new Uint8Array(await crypto.subtle.digest("SHA-256", bytes)));
+  }
+  function seedBytes(seedHex) {
+    if (typeof seedHex !== "string" || !/^[0-9a-f]{64}$/.test(seedHex)) return null;
+    const out = new Uint8Array(32);
+    for (let i = 0; i < 32; i += 1) out[i] = parseInt(seedHex.slice(i * 2, i * 2 + 2), 16);
+    return out;
+  }
+
+  // ------------------------------------------------------------ state
+  const state = {
+    client: null,
+    room: null,
+    me: null,            // { playerId, name, minChipsToSit, standardBuyIn }
+    view: null,          // TableView
+    conn: "idle",
+    holdDrop: false,     // a simulated drop: do not reconnect until asked
+    retry: 0,
+    retryTimer: null,
+    replaced: false,
+    topUp: null,         // last claimTopUp result
+    names: new Map(),    // playerId -> display name, from every view seen
+    published: new Map(),// roundId -> commitHash seen before the reveal
+    verified: new Map(), // roundId -> Promise<{ hash, published, faces }>
+    errorTimer: null,
+    logged: 0,
+  };
+
+  const myId = () => state.me?.playerId ?? null;
+  function mySeat(v) {
+    for (const s of SEATS) if (v.seats[s.id]?.playerId === myId()) return s.id;
+    return null;
+  }
+  function myPlayer(v) {
+    for (const s of SEATS) if (v.seats[s.id]?.playerId === myId()) return v.seats[s.id];
+    return v.chyakhe.find((p) => p.playerId === myId()) ?? null;
+  }
+  const nameOf = (id) => state.names.get(id) ?? (typeof id === "string" ? id.slice(0, 12) : "?");
+
+  // ------------------------------------------------------------ connection
+  function setConn(conn, banner) {
+    state.conn = conn;
+    const pill = $("conn");
+    pill.textContent = conn;
+    pill.className = "pill " + conn.split(" ")[0];
+    const b = $("banner");
+    b.hidden = banner === undefined;
+    b.className = conn === "replaced" || conn === "disconnected" ? "bad" : "";
+    b.textContent = banner ?? "";
+    $("drop").hidden = conn !== "connected";
+    $("reconnect").hidden = !(conn === "dropped" || conn === "disconnected" || conn === "replaced");
+  }
+
+  async function connect() {
+    clearTimeout(state.retryTimer);
+    state.replaced = false;
+    if (state.conn !== "reconnecting") setConn("connecting");
+    state.client ??= new Colyseus.Client(location.origin);
+    const options = { token: token(), name: $("name").value };
+    let room = null;
+    const last = load(KEY.room);
+    // The same room first, so a refresh lands back in the same seat.
+    if (last !== null) {
+      try { room = await state.client.joinById(last, options); } catch { room = null; }
+    }
+    if (room === null) room = await state.client.joinOrCreate("kauda", options);
+    attach(room);
+  }
+
+  function attach(room) {
+    state.room = room;
+    // The server resumes a player by token, not by Colyseus reconnection
+    // tokens, so the SDK's own reconnect loop is off and ours is below.
+    if (room.reconnection) room.reconnection.enabled = false;
+    room.onMessage("welcome", (m) => { state.me = m; render(); });
+    room.onMessage("view", (v) => onView(v));
+    room.onMessage("round", (r) => addLog(r));
+    room.onMessage("error", (e) => showError(e));
+    room.onMessage("topUp", (r) => { state.topUp = r; render(); });
+    room.onMessage("replaced", () => { state.replaced = true; });
+    room.onLeave((code) => onLeave(room, code));
+    room.send("sync");
+    save(KEY.room, room.roomId);
+    save(KEY.joined, "1");
+    save(KEY.name, $("name").value);
+    state.retry = 0;
+    setConn("connected");
+    $("join-panel").hidden = true;
+    for (const id of ["table-panel", "seats-panel", "throw-panel", "fair-panel", "log-panel"]) $(id).hidden = false;
+  }
+
+  function onLeave(room, code) {
+    if (room !== state.room) return; // an older connection
+    state.room = null;
+    if (state.replaced || code === REPLACED_CLOSE_CODE) {
+      setConn("replaced", "Another tab or window took over this player. Click Reconnect to take it back.");
+    } else if (code === CONSENTED_CLOSE_CODE) {
+      setConn("disconnected", "You left the table.");
+    } else if (state.holdDrop) {
+      setConn("dropped", "Connection dropped (simulated). Your seat is held for 3 rounds or 60 s. Click Reconnect.");
+    } else {
+      scheduleReconnect();
+    }
+    render();
+  }
+
+  function scheduleReconnect() {
+    state.retry += 1;
+    const delay = Math.min(1000 * 2 ** (state.retry - 1), 8000);
+    setConn("reconnecting", `Connection lost. Reconnecting (attempt ${state.retry}, in ${delay / 1000}s)…`);
+    state.retryTimer = setTimeout(() => {
+      connect().catch(() => scheduleReconnect());
+    }, delay);
+  }
+
+  // ------------------------------------------------------------ messages
+  function onView(v) {
+    state.view = v;
+    for (const p of [...Object.values(v.seats), ...v.chyakhe]) {
+      if (p) state.names.set(p.playerId, p.name);
+    }
+    if (v.roundId !== null && v.commitHash !== null) state.published.set(v.roundId, v.commitHash);
+    render();
+  }
+
+  function showError(reason) {
+    setText("error", "Refused: " + String(reason));
+    clearTimeout(state.errorTimer);
+    state.errorTimer = setTimeout(() => setText("error", ""), 6000);
+  }
+
+  function send(command) {
+    if (state.room) state.room.send("command", command);
+  }
+
+  /** Checks a settled round in the browser: sha256(seed), the hash shown before betting, and the faces. */
+  function verify(r) {
+    let p = state.verified.get(r.roundId);
+    if (p === undefined) {
+      p = (async () => {
+        const bytes = seedBytes(r.seed);
+        if (bytes === null) return { hash: false, published: false, faces: false, computed: "" };
+        const computed = await sha256Hex(bytes);
+        const seen = state.published.get(r.roundId);
+        const faces = r.faces.length === 16 && r.faces.every((f, i) => f === ((bytes[i] & 1) === 1));
+        return { hash: computed === r.commitHash, published: seen === undefined ? null : seen === computed, faces, computed };
+      })();
+      state.verified.set(r.roundId, p);
+    }
+    return p;
+  }
+
+  function mark(ok) {
+    return ok ? el("span", "ok", "✓") : el("span", "bad", "✗");
+  }
+
+  function addLog(r) {
+    state.logged += 1;
+    const li = el("li");
+    const throwerId = r.occupants[r.thrower];
+    const verdict = r.hit ? `${HIT} hit` : `${MISS} miss`;
+    li.append(el("strong", "", `#${state.logged} ${verdict}`));
+    li.append(document.createTextNode(
+      ` · ${nameOf(throwerId)} on ${SEAT[r.thrower].ne} · ${r.faceUp} up → ${SEAT[r.winningSeat].ne}` +
+      ` · stake ${r.stake} (${r.multiplier}×) · `,
+    ));
+    const moved = Object.entries(r.deltas).filter(([, c]) => c !== 0).sort((a, b) => b[1] - a[1]);
+    li.append(document.createTextNode(
+      moved.length === 0 ? "winning seat empty, no chips moved" :
+        moved.map(([id, c]) => `${nameOf(id)} ${c > 0 ? "+" : ""}${c}`).join(", "),
+    ));
+    li.append(document.createTextNode(" · "));
+    const check = el("span", "muted", "checking…");
+    li.append(check);
+    verify(r).then((v) => {
+      check.replaceWith(mark(v.hash && v.faces && v.published !== false));
+    });
+    const log = $("log");
+    log.prepend(li);
+    while (log.children.length > LOG_LIMIT) log.lastElementChild.remove();
+  }
+
+  // ------------------------------------------------------------ seats (built once)
+  const seatUi = {};
+  function buildSeats() {
+    const root = $("seats");
+    for (const s of SEATS) {
+      const card = el("div", "seat");
+      const title = el("div", "title");
+      title.append(el("span", "ne", s.ne), el("span", "num", `${s.n} · ${s.id}`));
+      const occupant = el("div");
+      const chips = el("div", "muted");
+      const throwMark = el("div", "throw-mark");
+      const reservation = el("div", "muted");
+      const sit = el("button", "", "Sit");
+      sit.addEventListener("click", () => send({ type: "sit", seat: s.id }));
+      const cancel = el("button", "", "Cancel reservation");
+      cancel.addEventListener("click", () => send({ type: "stand" }));
+      const betRow = el("div", "row");
+      const amount = el("input");
+      amount.type = "number"; amount.min = "1"; amount.step = "1"; amount.value = "10";
+      const bet = el("button", "", "Bet");
+      bet.addEventListener("click", () => {
+        const chips = Number(amount.value);
+        if (!Number.isSafeInteger(chips) || chips < 1) return showError("enter a whole number of chips");
+        send({ type: "placeBet", seat: s.id, chips });
+      });
+      betRow.append(amount, bet);
+      card.append(title, occupant, chips, throwMark, reservation, sit, cancel, betRow);
+      root.append(card);
+      seatUi[s.id] = { card, occupant, chips, throwMark, reservation, sit, cancel, betRow, bet };
+    }
+  }
+
+  function buildShells() {
+    const root = $("shells");
+    for (let i = 0; i < 16; i += 1) root.append(el("span", "shell"));
+  }
+
+  // ------------------------------------------------------------ render
+  function render() {
+    const v = state.view;
+    if (v === null || state.me === null) return;
+    const me = myPlayer(v);
+    const seat = mySeat(v);
+    const myReservation = v.reservations.find((r) => r.playerId === myId()) ?? null;
+    const between = v.phase === "waiting" || v.phase === "revealing";
+    const live = state.conn === "connected";
+
+    // Status line.
+    setText("phase", v.phase);
+    setText("round", v.roundId ?? "no round yet");
+    const multiplier = v.rules.thini > 0 ? v.stake / v.rules.thini : 1;
+    setText("stake", `stake ${v.stake} (${multiplier}×)` + (v.thrower ? ` · throw: ${SEAT[v.thrower].ne}` : ""));
+    setText("me-name", state.me.name);
+    setText("me-where", seat ? `on ${SEAT[seat].ne}` : myReservation ? `reserved ${SEAT[myReservation.seat].ne}` : "chyakhe");
+    setText("me-chips", me ? String(me.chips) : "—");
+
+    // Throw: only mine, only while throwing.
+    const throwerId = v.thrower ? v.seats[v.thrower]?.playerId : null;
+    $("throw").disabled = !(live && v.phase === "throwing" && throwerId === myId());
+    // Stand: when seated, between rounds.
+    $("stand").hidden = seat === null;
+    $("stand").disabled = !(live && between);
+    $("stand").title = between ? "" : "Only between rounds";
+    // My bet.
+    const myBet = v.bets.find((b) => b.playerId === myId());
+    setText("my-bet", myBet ? `Your bet: ${myBet.chips} on ${SEAT[myBet.seat].ne}` : "");
+    $("clear-bet").hidden = !myBet;
+    $("clear-bet").disabled = !(live && v.phase === "betting");
+    // Top Up: only when too poor to sit.
+    const poor = me !== null && me.chips < state.me.minChipsToSit;
+    $("topup").hidden = !poor;
+    renderTopUpStatus(poor);
+
+    // Seats.
+    for (const s of SEATS) {
+      const ui = seatUi[s.id];
+      const occ = v.seats[s.id];
+      const reservedBy = v.reservations.find((r) => r.seat === s.id) ?? null;
+      ui.card.classList.toggle("thrower", v.thrower === s.id);
+      ui.card.classList.toggle("mine", occ !== null && occ.playerId === myId());
+      ui.occupant.replaceChildren();
+      if (occ === null) {
+        ui.occupant.append(el("span", "muted", "empty"));
+      } else {
+        ui.occupant.append(el("strong", "", occ.name));
+        if (occ.isBot) ui.occupant.append(el("span", "tag", "bot"));
+        if (occ.playerId === myId()) ui.occupant.append(el("span", "tag you", "you"));
+        if (!occ.connected) ui.occupant.append(el("span", "tag off", "offline"));
+      }
+      ui.chips.textContent = occ === null ? "" : `chips ${occ.chips}`;
+      ui.throwMark.textContent = v.thrower === s.id ? `▶ to throw${v.streak > 0 ? ` · streak ${v.streak}` : ""}` : "";
+      ui.reservation.textContent = reservedBy === null ? "" :
+        reservedBy.playerId === myId() ? "Reserved for you: you sit when the next round opens" :
+          `Reserved by ${nameOf(reservedBy.playerId)}`;
+      // Sit: I am unseated, the seat is empty or a bot's, and nobody else has it reserved.
+      const takeable = seat === null && (occ === null || occ.isBot) && reservedBy === null;
+      ui.sit.hidden = !takeable;
+      ui.sit.textContent = between ? "Sit" : "Sit (reserve for next round)";
+      ui.sit.disabled = !live || me === null || me.chips < state.me.minChipsToSit;
+      ui.sit.title = ui.sit.disabled && me !== null ? `Need ${state.me.minChipsToSit} chips to sit` : "";
+      ui.cancel.hidden = !(reservedBy !== null && reservedBy.playerId === myId());
+      // Bets: only when unseated; never on the thrower's seat or an empty one; only in betting.
+      ui.betRow.hidden = seat !== null;
+      ui.bet.disabled = !(live && v.phase === "betting" && v.thrower !== s.id && occ !== null);
+      ui.bet.title = v.thrower === s.id ? "Cannot bet on the thrower's seat" : v.phase !== "betting" ? "Only while betting" : "";
+    }
+
+    renderThrow(v);
+    renderFairness(v);
+    renderClock();
+  }
+
+  function renderThrow(v) {
+    const r = v.lastRound;
+    const shells = $("shells").children;
+    for (let i = 0; i < 16; i += 1) shells[i].classList.toggle("up", r !== null && r.faces[i] === true);
+    setText("throw-summary", r === null ? "No throw yet." :
+      `${r.faceUp} face up → ${SEAT[r.winningSeat].ne} (${r.winningSeat}) · ${r.hit ? HIT + " hit" : MISS + " miss"} · ${r.roundId}`);
+  }
+
+  function renderFairness(v) {
+    const commit = $("commit-line");
+    commit.replaceChildren();
+    if (v.commitHash !== null) {
+      commit.append(el("span", "", `Commitment for ${v.roundId}: `), el("span", "mono", v.commitHash));
+    } else {
+      commit.append(el("span", "muted", "No pending commitment."));
+    }
+    const reveal = $("reveal-line");
+    const r = v.lastRound;
+    if (r === null) { reveal.replaceChildren(el("span", "muted", "Nothing revealed yet.")); return; }
+    if (reveal.dataset.round === r.roundId) return; // already shown
+    reveal.dataset.round = r.roundId;
+    reveal.replaceChildren(el("span", "muted", "checking…"));
+    verify(r).then((res) => {
+      if (reveal.dataset.round !== r.roundId) return;
+      const lines = [
+        [el("span", "", `Revealed seed for ${r.roundId}: `), el("span", "mono", r.seed)],
+        [el("span", "", "sha256(seed) in this browser: "), el("span", "mono", res.computed), document.createTextNode(" "),
+          mark(res.hash), document.createTextNode(res.hash ? " matches the round's commitHash" : " does NOT match the commitHash")],
+        [mark(res.published !== false), document.createTextNode(
+          res.published === null ? " (betting for this round was not seen here, so no earlier hash to compare)" :
+            res.published ? " matches the hash shown before betting closed" : " does NOT match the hash shown before betting")],
+        [mark(res.faces), document.createTextNode(res.faces ? " the 16 faces follow from the seed" : " the faces do NOT follow from the seed")],
+      ];
+      reveal.replaceChildren(...lines.map((parts) => { const d = el("div"); d.append(...parts); return d; }));
+    });
+  }
+
+  function renderTopUpStatus(poor) {
+    const r = state.topUp;
+    const btn = $("topup");
+    btn.disabled = state.conn !== "connected";
+    if (!poor || r === null) { setText("topup-status", poor ? `below the ${state.me?.minChipsToSit ?? ""} needed to sit` : ""); return; }
+    if (r.ok) { setText("topup-status", `topped up by ${r.chips}`); return; }
+    if (r.reason === "topup-cooldown" && typeof r.availableAt === "number") {
+      const left = Math.max(0, Math.ceil((r.availableAt - Date.now()) / 1000));
+      btn.disabled = btn.disabled || left > 0;
+      setText("topup-status", left > 0 ? `refused: cooldown, available in ${Math.floor(left / 60)}:${String(left % 60).padStart(2, "0")}` : "cooldown over, try again");
+      return;
+    }
+    setText("topup-status", `refused: ${r.reason}`);
+  }
+
+  function renderClock() {
+    const v = state.view;
+    if (v === null) return;
+    // phaseEndsAt is the server's clock; on 127.0.0.1 that is this machine's.
+    setText("countdown", v.phaseEndsAt === null ? "" : `${Math.max(0, (v.phaseEndsAt - Date.now()) / 1000).toFixed(1)}s left`);
+    if (state.me !== null) {
+      const me = myPlayer(v);
+      renderTopUpStatus(me !== null && me.chips < state.me.minChipsToSit);
+    }
+  }
+
+  // ------------------------------------------------------------ wiring
+  buildSeats();
+  buildShells();
+  $("name").value = load(KEY.name) ?? "";
+  $("join").addEventListener("click", () => {
+    $("join").disabled = true;
+    connect().catch((e) => {
+      $("join").disabled = false;
+      setConn("disconnected", "Could not join: " + String(e && e.message ? e.message : e));
+    });
+  });
+  $("throw").addEventListener("click", () => send({ type: "throw" }));
+  $("stand").addEventListener("click", () => send({ type: "stand" }));
+  $("clear-bet").addEventListener("click", () => send({ type: "clearBet" }));
+  $("topup").addEventListener("click", () => { if (state.room) state.room.send("claimTopUp"); });
+  $("drop").addEventListener("click", () => {
+    if (!state.room) return;
+    state.holdDrop = true;
+    state.room.leave(false); // close the socket without a goodbye, as a dead network would
+  });
+  $("reconnect").addEventListener("click", () => {
+    state.holdDrop = false;
+    state.retry = 0;
+    connect().catch(() => scheduleReconnect());
+  });
+  $("leave").addEventListener("click", () => {
+    forget(KEY.joined);
+    forget(KEY.room);
+    if (state.room) state.room.leave(true);
+  });
+  setInterval(renderClock, 100);
+  setConn("idle");
+
+  // A refresh brings a player who had joined straight back: same token, same room.
+  if (load(KEY.joined) === "1") $("join").click();
+})();
+</script>
+</body>
+</html>

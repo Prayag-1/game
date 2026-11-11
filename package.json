@@ -4,6 +4,7 @@
   "packageManager": "pnpm@9.12.0",
   "scripts": {
     "build": "turbo run build",
+    "dev": "pnpm --filter @kauda/rules build && pnpm --filter @kauda/server dev",
     "test": "turbo run test",
     "lint": "turbo run lint",
     "typecheck": "turbo run typecheck"

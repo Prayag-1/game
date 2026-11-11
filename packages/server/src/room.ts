@@ -21,7 +21,7 @@ import { MAX_PLAYERS, Table, type TableOptions } from "./table.js";
  *   "claimTopUp"  ask for a free top-up (topup.ts).
  *   "sync"        ask for "welcome" and the current "view" again.
  * Server -> client messages:
- *   "welcome"     { playerId, name } for this connection
+ *   "welcome"     { playerId, name, minChipsToSit, standardBuyIn } for this connection
  *   "view"        TableView, on every change
  *   "round"       RoundRecord, once per settled round, in order
  *   "error"       the reason string, when a request is refused
@@ -155,7 +155,7 @@ export class KaudaRoom extends Room {
     this.onMessage("sync", (client) => {
       const playerId = this.#playerBySession.get(client.sessionId);
       if (playerId === undefined) return void client.send("error", "not-at-table");
-      client.send("welcome", { playerId, name: this.#nameOf(playerId) });
+      client.send("welcome", this.#welcome(playerId, this.#nameOf(playerId)));
       client.send("view", this.table.view());
     });
 
@@ -167,8 +167,8 @@ export class KaudaRoom extends Room {
   override async onAuth(_client: Client, options: unknown): Promise<Identity> {
     const deps = this.deps;
     if (deps === undefined) throw new ServerError(ErrorCode.AUTH_FAILED, "room not configured");
-    const token = options !== null && typeof options === "object" ? (options as { token?: unknown }).token : undefined;
-    const identity = await deps.identity.resolveIdentity(token);
+    const given = options !== null && typeof options === "object" ? (options as { token?: unknown; name?: unknown }) : {};
+    const identity = await deps.identity.resolveIdentity(given.token, { name: given.name });
     if (identity === null || !isValidPlayerId(identity.playerId) || identity.playerId === MINT_ACCOUNT) {
       throw new ServerError(ErrorCode.AUTH_FAILED, "unknown identity");
     }
@@ -194,7 +194,7 @@ export class KaudaRoom extends Room {
     this.#away.delete(playerId);
     this.#syncAutoDispose();
 
-    client.send("welcome", { playerId, name });
+    client.send("welcome", this.#welcome(playerId, name));
     if (!this.#publish()) client.send("view", this.table.view());
   }
 
@@ -213,6 +213,11 @@ export class KaudaRoom extends Room {
     }
     this.#syncAutoDispose();
     this.#publish();
+  }
+
+  /** Who this connection is, and the table limits a client needs to offer the right buttons. */
+  #welcome(playerId: string, name: string) {
+    return { playerId, name, minChipsToSit: this.table.minChipsToSit, standardBuyIn: this.table.standardBuyIn };
   }
 
   #nameOf(playerId: string): string {

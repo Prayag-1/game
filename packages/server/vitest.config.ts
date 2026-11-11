@@ -10,6 +10,9 @@ export default defineConfig({
     // @colyseus/testing loads @colyseus/tools, and Colyseus core then loads @pm2/io, which
     // writes to process.send when it exists. In a forked worker that is
     // vitest's own IPC channel, and the run dies. Worker threads have none.
-    poolMatchGlobs: [["**/test/room.test.ts", "threads"]],
+    poolMatchGlobs: [
+      ["**/test/room.test.ts", "threads"],
+      ["**/test/devserver.test.ts", "threads"],
+    ],
   },
 });
