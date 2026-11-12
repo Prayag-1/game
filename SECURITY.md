@@ -114,7 +114,14 @@ player-to-player gift. A second, independent check isolates settlement from
 funding: the sum of all `round` entries over any period is 0, so a settlement
 bug cannot hide behind a buy-in.
 
-Top-ups exist because the game is exactly fair: a fair game between one finite
+Top-ups exist because the game is close to even. Each throw is exactly zero
+expected value from teeya or panja; chauka takes 5 of the 17 face counts, so
+chauka's thrower gains 1/128 of a thini per throw (of the stake, once doubled)
+and chakka's loses the same, and chyakhe bets involving those two seats carry a
+correspondingly small edge. That asymmetry is part of the traditional game and
+kept on purpose (CLAUDE.md, "The rules model"; proved in
+`packages/rules/test/settlement.test.ts`, "the game is exactly fair" block). A
+near-even game between one finite
 bankroll and bots that are re-funded forever is gambler's ruin, and the human
 busts with probability 1 (median about 745 rounds from 2000 chips). A human
 below the minimum to sit may claim a top-up back to the standard buy-in, once
@@ -328,8 +335,10 @@ hope of beating them.
 
 *Defence.*
 
-- Our bots play the same zero-edge game, so there is nothing to win from them
-  on average. Bots are funded from the mint (`botBuyin`) and hand their
+- Our bots play the same game, so there is nothing to win from them on
+  average beyond the deliberate chauka/chakka asymmetry: 1/128 of a thini per
+  throw from the chauka seat, lost again from chakka, and as small for chyakhe
+  bets (see "Where chips come from: the mint"). Bots are funded from the mint (`botBuyin`) and hand their
   residual back to it when they leave (`botResidual`), all in the same ledger,
   so their wins and losses are recorded too, and a player who is steadily up
   against bots shows up in the data as a net flow out of the mint.

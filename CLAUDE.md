@@ -58,9 +58,28 @@ Exact odds over all 65536 throws:
 
 Settlement: on a hit the thrower collects the current stake from each of the
 three other seats; on a miss the thrower pays the current stake to the winning
-seat only. A hit happens one time in four and a miss three times in four, so
-collecting 3x and paying 1x is exactly even **at any stake level**. Doubling
-therefore changes the swing of the game without touching its fairness, and the
+seat only. The thrower's expected value per throw is stake x (4 x P(hit) - 1).
+
+- **Teeya and panja: exactly zero.** Each lands one time in four, so
+  collecting 3x and paying 1x is exactly even, at every streak and stake.
+  Proved by `packages/rules/test/settlement.test.ts`, "gives the thrower
+  exactly zero edge from teeya and from panja, at every streak".
+- **Chauka and chakka: a small, deliberate edge.** Chauka takes 5 of the 17
+  face counts (16512 of 65536 throws), so chauka's thrower gains 1/128 of the
+  stake per throw (1/128 of a thini at the base stake) and chakka's thrower,
+  on 16256 throws, loses the same. Proved by "gives chauka exactly 1/128 of a
+  thini per throw, and chakka the opposite" and, for every streak, "scales
+  the chauka edge with the stake, so doubling does not create a new one". The
+  counts are proved in `packages/rules/test/odds.test.ts`, "counts every
+  possible throw and matches the binomial weights".
+- **Chyakhe bets.** A bet's expected value is chips x (P(its seat) -
+  P(thrower)): zero between teeya and panja, and a correspondingly small edge
+  whenever chauka or chakka is involved (at most 1/256 of the bet, chauka
+  against a chakka thrower). Proved by "gives every chyakhe bet exactly
+  chips x (P(seat) - P(thrower))".
+
+This asymmetry is part of the traditional game, not a bug, and is kept on
+purpose. Doubling changes the swing of the game but adds no new edge, and the
 multiplier cap exists to protect chip balances, not to balance the odds.
 
 This also reconciles the article's two conflicting accounts of mar-taal. The
@@ -71,7 +90,9 @@ ties it to the losers.
 
 Ghanti is modelled as a fee the thrower pays on the first hit of a turn, split
 among the other seated players. It is a transfer, never a rake, so the table
-still sums to zero.
+still sums to zero. It is separate from the figures above: it costs the
+thrower ghanti x P(hit) on a turn's first throw, paid to the other seats.
+Proved by "makes ghanti a pure transfer: the four players' totals sum to zero".
 
 An earlier model that paid `thini x streak` on the miss gave the thrower a
 +0.42 thini edge per turn and needed a ghanti of 5/3 thini to cancel. It was
