@@ -1,17 +1,21 @@
 import type { Client, Room } from "@colyseus/sdk";
-import { create } from "zustand";
 import { api, type Result, type SeatGrant } from "./api";
+import type { Command } from "./protocol";
 import { useSession, type Notice } from "./session";
+import { ingest, initialTableState, useTable } from "./tableStore";
 
 /**
- * The connection to one table. The server reserves a seat over HTTP (lobby
- * routes); this takes it with the reservation over the WebSocket, whose
- * upgrade carries the session cookie, so who we are comes from the cookie
- * and never from anything sent here.
+ * The socket adapter: the only code that touches the Colyseus room. It feeds
+ * every message into the store (tableStore.ts) and offers a few actions;
+ * components read the store and call these, never the socket.
  *
- * Everything the room sends is untrusted data. The placeholder table screen
- * shows it as JSON text; nothing from the server is ever rendered as HTML.
+ * The server reserves a seat over HTTP (lobby routes); this takes it with the
+ * reservation over the WebSocket, whose upgrade carries the session cookie,
+ * so who we are comes from the cookie and never from anything sent here.
  */
+
+export { useTable } from "./tableStore";
+export type { Connection } from "./tableStore";
 
 /** Close codes from packages/server/src/room.ts. */
 const CONSENTED_CLOSE_CODE = 4000;
@@ -19,38 +23,7 @@ const REPLACED_CLOSE_CODE = 4100;
 const MOVED_CLOSE_CODE = 4101;
 const SESSION_ENDED_CLOSE_CODE = 4102;
 const MAX_RECONNECT_ATTEMPTS = 8;
-
-export type Connection = "idle" | "connecting" | "connected" | "reconnecting" | "replaced" | "paused";
-
-interface TableState {
-  readonly conn: Connection;
-  readonly attempt: number;
-  readonly tableId: string | null;
-  readonly code: string | null;
-  readonly shareUrl: string | null;
-  /** The latest "welcome" and "view" messages, and the last "round", as received. */
-  readonly welcome: unknown;
-  readonly view: unknown;
-  readonly lastRound: unknown;
-  /** The latest refusal reason from the room. */
-  readonly refusal: string | null;
-  readonly pausedReason: string | null;
-}
-
-const initial: TableState = {
-  conn: "idle",
-  attempt: 0,
-  tableId: null,
-  code: null,
-  shareUrl: null,
-  welcome: null,
-  view: null,
-  lastRound: null,
-  refusal: null,
-  pausedReason: null,
-};
-
-export const useTable = create<TableState>()(() => initial);
+const MESSAGES = ["welcome", "view", "round", "error", "topUp", "paused"] as const;
 
 let client: Client | null = null;
 let room: Room | null = null;
@@ -69,7 +42,15 @@ async function colyseus(): Promise<Client> {
   return client;
 }
 
-const reason = (v: unknown): string => (typeof v === "string" ? v.slice(0, 80) : "unknown");
+/** Sends a table command. The server validates it against the phase and my real balance. */
+export function send(command: Command): void {
+  room?.send("command", command);
+}
+
+/** Asks for a free top-up; the answer arrives as a "topUp" message. */
+export function claimTopUp(): void {
+  room?.send("claimTopUp");
+}
 
 /**
  * Asks the server for a seat with `request`, then connects to it. Returns the
@@ -77,8 +58,7 @@ const reason = (v: unknown): string => (typeof v === "string" ? v.slice(0, 80) :
  */
 export async function takeSeat(request: () => Promise<Result<SeatGrant>>): Promise<Result<string>> {
   clearTimeout(retryTimer);
-  const state = useTable.getState();
-  if (state.conn !== "reconnecting") useTable.setState({ conn: "connecting" });
+  if (useTable.getState().conn !== "reconnecting") useTable.setState({ conn: "connecting" });
   const grant = await request();
   if (!grant.ok) {
     if (useTable.getState().conn === "connecting") useTable.setState({ conn: "idle" });
@@ -105,7 +85,10 @@ function attach(joined: Room, grant: SeatGrant): void {
   // reconnection tokens, so the SDK's own reconnect loop is off; ours is below.
   joined.reconnection.enabled = false;
   const code = grant.code ?? null;
+  const sameTable = useTable.getState().tableId === grant.table.id;
   useTable.setState({
+    // A reconnect to the same table keeps the log and the fairness checks.
+    ...(sameTable ? {} : { ...initialTableState }),
     conn: "connected",
     attempt: 0,
     tableId: grant.table.id,
@@ -114,23 +97,15 @@ function attach(joined: Room, grant: SeatGrant): void {
     refusal: null,
     pausedReason: null,
   });
-  const mine = (fn: (payload: unknown) => void) => (payload: unknown) => {
-    if (room === joined) fn(payload);
-  };
-  joined.onMessage("welcome", mine((welcome) => useTable.setState({ welcome })));
-  joined.onMessage("view", mine((view) => useTable.setState({ view })));
-  joined.onMessage("round", mine((lastRound) => useTable.setState({ lastRound })));
-  joined.onMessage("error", mine((e) => useTable.setState({ refusal: reason(e) })));
-  joined.onMessage("topUp", () => {});
+  for (const type of MESSAGES) {
+    joined.onMessage(type, (payload: unknown) => {
+      if (room === joined) ingest(type, payload);
+    });
+  }
   joined.onMessage("ended", () => {});
-  joined.onMessage("replaced", mine(() => (replaced = true)));
-  joined.onMessage(
-    "paused",
-    mine((m) => {
-      const why = typeof m === "object" && m !== null ? (m as { reason?: unknown }).reason : undefined;
-      useTable.setState({ conn: "paused", pausedReason: reason(why) });
-    }),
-  );
+  joined.onMessage("replaced", () => {
+    if (room === joined) replaced = true;
+  });
   joined.onLeave((closeCode: number) => onLeave(joined, closeCode));
   joined.send("sync");
 }
@@ -138,14 +113,14 @@ function attach(joined: Room, grant: SeatGrant): void {
 function toLobby(notice: Notice | null): void {
   clearTimeout(retryTimer);
   room = null;
-  useTable.setState({ ...initial });
+  useTable.setState({ ...initialTableState });
   if (notice !== null) useSession.getState().setNotice(notice);
 }
 
 function onLeave(left: Room, closeCode: number): void {
   if (left !== room) return; // an older connection
+  room = null;
   if (replaced || closeCode === REPLACED_CLOSE_CODE) {
-    room = null;
     useTable.setState({ conn: "replaced" });
   } else if (closeCode === CONSENTED_CLOSE_CODE) {
     toLobby(null);
@@ -154,11 +129,8 @@ function onLeave(left: Room, closeCode: number): void {
   } else if (closeCode === SESSION_ENDED_CLOSE_CODE) {
     toLobby(null);
     useSession.getState().signedOut({ key: "notices.sessionEnded" });
-  } else if (useTable.getState().conn === "paused") {
-    room = null; // stay on the paused screen; leaving takes the player back
-  } else {
-    room = null;
-    scheduleReconnect();
+  } else if (useTable.getState().conn !== "paused") {
+    scheduleReconnect(); // a paused table stays on screen; leaving takes the player back
   }
 }
 
@@ -179,9 +151,9 @@ async function reconnect(): Promise<void> {
 }
 
 /**
- * Back to the table this account is at, after a page refresh. Does nothing
- * if a connection is already open or opening (React StrictMode runs effects
- * twice in development).
+ * Back to the table this account is at, after a page refresh or when taking
+ * over from another tab. Shares one attempt between callers (React
+ * StrictMode runs effects twice in development).
  */
 let resuming: Promise<Result<string>> | null = null;
 export function resume(): Promise<Result<string>> {
@@ -212,5 +184,5 @@ export function resetTableForTests(): void {
   clearTimeout(retryTimer);
   room = null;
   client = null;
-  useTable.setState({ ...initial });
+  useTable.setState({ ...initialTableState });
 }

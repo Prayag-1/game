@@ -17,6 +17,7 @@
   "dependencies": {
     "@colyseus/sdk": "0.18.6",
     "@fontsource/noto-sans-devanagari": "5.3.0",
+    "@kauda/rules": "workspace:*",
     "i18next": "25.10.10",
     "react": "19.3.1",
     "react-dom": "19.3.1",

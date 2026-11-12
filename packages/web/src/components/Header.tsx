@@ -1,3 +1,4 @@
+import { numberFormat } from "../lib/format";
 import { useTranslation } from "react-i18next";
 import { useMyChips } from "../lib/chips";
 import { useSession } from "../lib/session";
@@ -8,7 +9,7 @@ export function Header() {
   const { t, i18n } = useTranslation();
   const me = useSession((s) => s.me);
   const chips = useMyChips();
-  const format = new Intl.NumberFormat(i18n.language === "ne" ? "ne-NP" : "en");
+  const format = numberFormat(i18n.language);
   return (
     <header className="sticky top-0 z-10 bg-orange-900 text-amber-50 shadow">
       <div className="mx-auto flex max-w-3xl items-center gap-3 px-4 py-2">

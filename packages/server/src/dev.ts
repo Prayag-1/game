@@ -1,8 +1,10 @@
 /**
  * DEVELOPER SERVER. FOR YOUR OWN MACHINE ONLY. NEVER EXPOSE IT TO A NETWORK.
  *
- * `pnpm dev` from the repo root, then open http://127.0.0.1:3000/ . PORT
- * changes the port; the address is always 127.0.0.1. See devServer.ts.
+ * `pnpm dev` from the repo root starts this and the web client's Vite dev
+ * server; open http://127.0.0.1:5173/ . `pnpm preview` serves the built web
+ * client from here instead, at http://127.0.0.1:3000/ . PORT changes this
+ * server's port; the address is always 127.0.0.1. See devServer.ts.
  *
  * Environment (all optional in development):
  *   DATABASE_URL          Postgres; otherwise PGlite under .data/
@@ -12,9 +14,10 @@
  *                         otherwise Cloudflare's always-pass test keys
  *   KAUDA_GUESTS_PER_HOUR guest creations per IP per hour (default 5)
  *   KAUDA_WEB_DIST        serve the built web client from this directory at /
- *                         (under its strict CSP); the debug client moves to /debug
+ *                         (under its strict CSP)
  *   KAUDA_PROXY_ORIGINS   comma-separated origins of a dev front end that
  *                         proxies here (the Vite dev server; scripts/dev.mjs sets it)
+ *   KAUDA_FAST_ROUNDS=1   short phases (about 4 s a round), for end-to-end tests
  */
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -36,6 +39,9 @@ if (!Number.isSafeInteger(guestsPerHour) || guestsPerHour < 1) {
 }
 
 const webDist = process.env.KAUDA_WEB_DIST ? resolve(process.env.KAUDA_WEB_DIST) : undefined;
+// Short phases so an end-to-end test reaches its own throw quickly. Dev only.
+const FAST_TIMINGS = { bettingMs: 2_500, throwingMs: 6_000, revealMs: 1_200, botThrowDelayMs: 300, botBetDelayMs: 300 };
+const fastRounds = process.env.KAUDA_FAST_ROUNDS === "1";
 const proxyOrigins = (process.env.KAUDA_PROXY_ORIGINS ?? "")
   .split(",")
   .map((o) => o.trim())
@@ -57,6 +63,7 @@ try {
     store,
     ...(webDist === undefined ? {} : { web: { distDir: webDist } }),
     proxyOrigins,
+    ...(fastRounds ? { room: { table: { timings: FAST_TIMINGS } } } : {}),
     auth: {
       secret,
       turnstileSiteKey: turnstileKeys.siteKey,
@@ -83,9 +90,10 @@ process.once("SIGTERM", () => void stop());
 process.stdout.write(
   [
     "",
-    ...(webDist === undefined ? [] : [`  Kauda web client:   ${dev.url}  (built from ${webDist})`]),
-    `  Kauda debug client: ${dev.debugUrl}`,
-    ...(proxyOrigins.length === 0 ? [] : [`  Accepting proxy:    ${proxyOrigins.join(", ")}`]),
+    `  Kauda game server:  ${dev.url}`,
+    ...(webDist === undefined ? [] : [`  Web client:         ${dev.url}  (built from ${webDist})`]),
+    ...(proxyOrigins.length === 0 ? [] : [`  Web client via:     ${proxyOrigins.join(", ")}  (dev proxy)`]),
+    ...(fastRounds ? ["  Rounds:             FAST (KAUDA_FAST_ROUNDS=1)"] : []),
     `  Chips stored in:    ${store.description}`,
     `  Session key:        ${secretSource}`,
     `  Turnstile:          ${turnstileKeys.testKeys ? "Cloudflare's always-pass TEST keys" : "keys from the environment"}`,

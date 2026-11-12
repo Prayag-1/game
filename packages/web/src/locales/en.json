@@ -80,7 +80,6 @@
     "you": "you",
     "chyakheCount": "{{count}}",
     "lastRound": "Last round",
-    "faceUp": "{{count}} shells face up",
     "shareTitle": "Invite friends",
     "shareHint": "Send them this link or code.",
     "code": "Code",
@@ -88,15 +87,42 @@
     "copied": "Copied"
   },
   "terms": {
-    "teeya": { "label": "तीया", "tip": "Teeya: seat 3" },
-    "chauka": { "label": "चौका", "tip": "Chauka: seat 4" },
-    "panja": { "label": "पञ्जा", "tip": "Panja: seat 5" },
-    "chakka": { "label": "छक्का", "tip": "Chakka: seat 6" },
-    "thini": { "label": "ठिनी", "tip": "Thini: the base stake, in chips" },
-    "hate": { "label": "हाते", "tip": "Hate: the four players seated inside" },
-    "chyakhe": { "label": "च्याँखे", "tip": "Chyakhe: outside bettors" },
-    "maryo": { "label": "मा-र्यो", "tip": "Ma-ryo: a hit, the thrower wins" },
-    "tiryo": { "label": "ति-र्यो", "tip": "Ti-ryo: a miss, the thrower pays" }
+    "teeya": {
+      "label": "तीया",
+      "tip": "Teeya: seat 3"
+    },
+    "chauka": {
+      "label": "चौका",
+      "tip": "Chauka: seat 4"
+    },
+    "panja": {
+      "label": "पञ्जा",
+      "tip": "Panja: seat 5"
+    },
+    "chakka": {
+      "label": "छक्का",
+      "tip": "Chakka: seat 6"
+    },
+    "thini": {
+      "label": "ठिनी",
+      "tip": "Thini: the base stake, in chips"
+    },
+    "hate": {
+      "label": "हाते",
+      "tip": "Hate: the four players seated inside"
+    },
+    "chyakhe": {
+      "label": "च्याँखे",
+      "tip": "Chyakhe: outside bettors"
+    },
+    "maryo": {
+      "label": "मा-र्यो",
+      "tip": "Ma-ryo: a hit, the thrower wins"
+    },
+    "tiryo": {
+      "label": "ति-र्यो",
+      "tip": "Ti-ryo: a miss, the thrower pays"
+    }
   },
   "errors": {
     "bad-name": "That name is not allowed: 3 to 20 letters (Latin or Devanagari), digits, spaces, _ or -.",
@@ -120,5 +146,85 @@
     "seatGivenUp": "Your seat was given up while you were away.",
     "loggedOut": "Logged out. A new guest is a new account, with fresh chips.",
     "paused": "The table stopped: {{reason}}. Chips are as last saved."
+  },
+  "play": {
+    "phaseEnds": "{{seconds}} s",
+    "stake": "Stake",
+    "multiplier": "×{{n}}",
+    "stakeTip": "Current stake in chips, and its multiplier",
+    "throwerMark": "Throwing",
+    "throwerMarkTip": "Whose throw it is",
+    "seatNumber": "No. {{n}}",
+    "empty": "Empty",
+    "bot": "bot",
+    "you": "you",
+    "away": "away",
+    "chips": "{{chips}} chips",
+    "reservedFor": "Reserved for {{name}}",
+    "reservedForYou": "Yours from the next round",
+    "sit": "Sit",
+    "stand": "Stand",
+    "cancelReservation": "Cancel reservation",
+    "throw": "Throw",
+    "yourThrow": "Your turn! Throw the shells.",
+    "myChips": "My chips",
+    "seatedAs": "You are on {{seat}}",
+    "watching": "You are a chyakhe (outside bettor)",
+    "betAmount": "Bet amount",
+    "betOn": "Bet on {{seat}}",
+    "yourBet": "Your bet: {{chips}} chips on {{seat}}",
+    "clearBet": "Clear bet",
+    "betsOnSeat": "Bets {{chips}}",
+    "betsClosed": "Betting is closed",
+    "topUp": "Get free chips",
+    "topUpHint": "You need at least {{min}} chips to sit.",
+    "topUpCooldown": "Not yet. Try again after {{time}}.",
+    "topUpDone": "{{chips}} chips added.",
+    "log": "Rounds",
+    "logEmpty": "No round has settled yet.",
+    "logThrower": "{{seat}} threw",
+    "logWinner": "{{seat}} won",
+    "gained": "{{name}} +{{chips}}",
+    "lost": "{{name}} −{{chips}}",
+    "stageWaiting": "Waiting for the throw",
+    "stageFaceUp": "{{n}} face up",
+    "stageLabel": "Sixteen shells: {{n}} face up",
+    "fairness": "Fairness",
+    "fairnessHint": "Before betting the server shows the sha256 of the seed; after the round, the seed itself. This browser checks it for itself.",
+    "commitHash": "This round's commitment (sha256)",
+    "noCommit": "No commitment right now.",
+    "seed": "Revealed seed",
+    "computed": "sha256 computed by this browser",
+    "checkOk": "matches",
+    "checkBad": "does not match",
+    "checking": "Checking…",
+    "noRound": "No seed revealed yet.",
+    "checkHash": "sha256(seed) = commitment",
+    "checkPublished": "Same commitment as shown before betting",
+    "checkFaces": "Seed gives the same shells and winner",
+    "notSeenPublished": "(this page joined late and did not see the commitment)",
+    "wins": "wins!"
+  },
+  "refusals": {
+    "wrong-phase": "You can't do that right now.",
+    "already-seated": "You are already seated.",
+    "seat-taken": "Someone else has that seat.",
+    "insufficient-chips": "Not enough chips.",
+    "not-seated": "You are not seated.",
+    "seated-cannot-bet": "Seated players can't bet.",
+    "chyakhe-disabled": "This table has no outside bets.",
+    "thrower-seat": "You can't bet on the thrower's seat.",
+    "empty-seat": "That seat is empty.",
+    "too-many-chyakhe": "Too many outside bettors already.",
+    "thrower-cannot-cover": "The thrower can't cover a bet that size.",
+    "no-bet": "You have no bet.",
+    "not-thrower": "It isn't your throw.",
+    "not-at-table": "You are not at the table.",
+    "table-full": "The table is full.",
+    "table-paused": "The table is paused.",
+    "topup-cooldown": "Free chips aren't available yet.",
+    "topup-not-needed": "You have enough chips.",
+    "malformed": "The request was malformed.",
+    "unknown": "The server refused ({{code}})."
   }
 }

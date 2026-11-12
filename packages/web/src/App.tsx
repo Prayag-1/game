@@ -6,7 +6,7 @@ import { normaliseCode } from "./lib/api";
 import { useSession } from "./lib/session";
 import { Lobby } from "./screens/Lobby";
 import { SignIn } from "./screens/SignIn";
-import { TablePlaceholder } from "./screens/TablePlaceholder";
+import { TableScreen } from "./screens/Table";
 
 /** A shared link, /?code=XXXXXX: kept for after sign-in, and taken off the URL so a refresh does not re-join. */
 export function takeCodeFromUrl(): void {
@@ -44,7 +44,7 @@ export function App() {
       ) : (
         <Routes>
           <Route path="/" element={<Lobby />} />
-          <Route path="/table/:tableId" element={<TablePlaceholder />} />
+          <Route path="/table/:tableId" element={<TableScreen />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       )}

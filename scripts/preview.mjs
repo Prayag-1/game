@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 /**
  * `pnpm preview`: the production build of the web client, served by the game
- * server itself under the strict CSP, on http://127.0.0.1:3000/ (the debug
- * client moves to /debug). `pnpm preview` builds packages/web first.
+ * server itself under the strict CSP, on http://127.0.0.1:3000/.
+ * `pnpm preview` builds packages/web first.
  */
 import { spawn, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";

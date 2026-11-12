@@ -1,8 +1,9 @@
 /**
  * DEVELOPER SERVER. FOR YOUR OWN MACHINE ONLY. NEVER EXPOSE IT TO A NETWORK.
  *
- * Serves the debug client (debug-client/index.html), the session routes
- * (auth/http.ts) and the KaudaRoom on one port, bound to 127.0.0.1 only.
+ * Serves the session routes (auth/http.ts), the lobby routes (lobby/http.ts),
+ * the KaudaRoom and, with `web`, the built web client, on one port, bound to
+ * 127.0.0.1 only.
  * Identity is a real guest session (signed cookie, hashed id in the
  * database), but this server runs over plain HTTP with Cloudflare's test
  * Turnstile keys and a dev signing key, so it is a tool, not a service.
@@ -22,23 +23,18 @@
  *   routes refuse state changes from any other Origin;
  * - pages are served only for a Host of 127.0.0.1 or localhost on this
  *   port, against DNS rebinding;
- * - the page has a strict Content-Security-Policy: scripts from this origin,
- *   the page's one inline script (by hash) and Cloudflare's Turnstile.
+ * - the page has a strict Content-Security-Policy (webClient.ts): scripts
+ *   from this origin and Cloudflare's Turnstile, no inline code, no eval.
  *
- * With `web`, the built web client (packages/web/dist) is served at / under
- * its own strict policy (webClient.ts), and the debug client moves to /debug.
+ * With `web`, the built web client (packages/web/dist) is served at /.
+ * Without it (`pnpm dev`), the Vite dev server serves the page instead.
  *
  * `proxyOrigins` are the origins of a dev front end that proxies to this
  * server: the Vite dev server (packages/web/vite.config.ts). Through the
  * proxy the browser's Origin header is the Vite page's, so the Origin checks
  * above accept those as well. Nothing else is relaxed, and there is no CORS.
  */
-import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
 import type { AddressInfo } from "node:net";
-import { createRequire } from "node:module";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { Server, matchMaker } from "@colyseus/core";
 import { WebSocketTransport } from "@colyseus/ws-transport";
 import { DEFAULT_HOUSE_RULES } from "@kauda/rules";
@@ -61,10 +57,6 @@ export const DEFAULT_GUESTS_PER_HOUR = 5;
 /** Table code guesses allowed per 10 minutes: per IP, and per session. */
 export const DEFAULT_CODE_GUESSES = { perIp: 30, perSession: 10, windowMs: 10 * 60_000 } as const;
 export const DEFAULT_PRIVATE_TABLES_PER_HOUR = 10;
-const TURNSTILE_ORIGIN = "https://challenges.cloudflare.com";
-
-const CLIENT_HTML = fileURLToPath(new URL("../debug-client/index.html", import.meta.url));
-const SDK_BUNDLE = join(dirname(createRequire(import.meta.url).resolve("@colyseus/sdk/package.json")), "dist", "colyseus.js");
 
 export interface DevServerOptions {
   /** 0 picks a free port. */
@@ -87,7 +79,7 @@ export interface DevServerOptions {
   };
   /** Overrides for the room, for tests. */
   readonly room?: Partial<KaudaRoomDeps>;
-  /** Serve the built web client from this directory at /; the debug client moves to /debug. */
+  /** Serve the built web client from this directory at /. */
   readonly web?: { readonly distDir: string };
   /** Origins of a dev front end that proxies to this server, such as http://127.0.0.1:5173. */
   readonly proxyOrigins?: readonly string[];
@@ -99,36 +91,7 @@ export interface DevServer {
   readonly directory: TableDirectory;
   readonly port: number;
   readonly url: string;
-  /** Where the debug client is: / without `web`, /debug with it. */
-  readonly debugUrl: string;
   close(): Promise<void>;
-}
-
-/**
- * The sha256 CSP source for the content of the page's single bare <tag>.
- * Browsers hash the element's text after the HTML parser has turned CRLF and
- * lone CR into LF, so this does the same: a Windows checkout with CRLF line
- * endings must still produce the hash the browser computes.
- */
-function inlineHash(html: string, tag: "script" | "style"): string {
-  const match = new RegExp(`<${tag}>([\\s\\S]*?)</${tag}>`).exec(html);
-  if (match?.[1] === undefined) throw new Error(`debug client has no inline <${tag}>`);
-  const text = match[1].replace(/\r\n?/g, "\n");
-  return `'sha256-${createHash("sha256").update(text, "utf8").digest("base64")}'`;
-}
-
-export function contentSecurityPolicy(html: string, port: number): string {
-  return [
-    "default-src 'none'",
-    `script-src 'self' ${TURNSTILE_ORIGIN} ${inlineHash(html, "script")}`,
-    `style-src ${inlineHash(html, "style")}`,
-    `connect-src 'self' ws://${DEV_HOST}:${port} ws://localhost:${port}`,
-    `frame-src ${TURNSTILE_ORIGIN}`,
-    "img-src 'none'",
-    "base-uri 'none'",
-    "form-action 'none'",
-    "frame-ancestors 'none'",
-  ].join("; ");
 }
 
 export async function startDevServer(options: DevServerOptions): Promise<DevServer> {
@@ -169,29 +132,6 @@ export async function startDevServer(options: DevServerOptions): Promise<DevServ
         res.status(421).type("text/plain").send("wrong host");
       });
       if (web !== null) app.use((req, res, next) => web.handle(req, res, next));
-      app.get(web === null ? "/" : "/debug", (_req, res) => {
-        // Read on every request, so editing the page needs no restart.
-        const html = readFileSync(CLIENT_HTML, "utf8");
-        res
-          .set({
-            "Content-Type": "text/html; charset=utf-8",
-            "Content-Security-Policy": contentSecurityPolicy(html, port),
-            "X-Content-Type-Options": "nosniff",
-            "Referrer-Policy": "no-referrer",
-            "Cross-Origin-Opener-Policy": "same-origin",
-            "Cache-Control": "no-store",
-          })
-          .send(html);
-      });
-      app.get("/vendor/colyseus.js", (_req, res) => {
-        res
-          .set({
-            "Content-Type": "text/javascript; charset=utf-8",
-            "X-Content-Type-Options": "nosniff",
-            "Cache-Control": "no-store",
-          })
-          .send(readFileSync(SDK_BUNDLE, "utf8"));
-      });
       mountSessionRoutes(app as unknown as RouteApp, {
         db: options.store.db,
         sessions,
@@ -247,7 +187,6 @@ export async function startDevServer(options: DevServerOptions): Promise<DevServ
     directory,
     port,
     url: `http://${DEV_HOST}:${port}/`,
-    debugUrl: `http://${DEV_HOST}:${port}/${web === null ? "" : "debug"}`,
     close: () => server.gracefullyShutdown(false),
   };
 }

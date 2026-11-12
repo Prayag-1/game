@@ -81,7 +81,6 @@
     "you": "तपाईं",
     "chyakheCount": "{{count}} जना",
     "lastRound": "अघिल्लो पालो",
-    "faceUp": "{{count}} कौडा उत्तानो",
     "shareTitle": "साथीहरूलाई बोलाउनुहोस्",
     "shareHint": "यो लिङ्क वा कोड पठाउनुहोस्।",
     "code": "कोड",
@@ -89,15 +88,42 @@
     "copied": "कपी भयो"
   },
   "terms": {
-    "teeya": { "label": "तीया", "tip": "Teeya: seat 3" },
-    "chauka": { "label": "चौका", "tip": "Chauka: seat 4" },
-    "panja": { "label": "पञ्जा", "tip": "Panja: seat 5" },
-    "chakka": { "label": "छक्का", "tip": "Chakka: seat 6" },
-    "thini": { "label": "ठिनी", "tip": "Thini: the base stake, in chips" },
-    "hate": { "label": "हाते", "tip": "Hate: the four players seated inside" },
-    "chyakhe": { "label": "च्याँखे", "tip": "Chyakhe: outside bettors" },
-    "maryo": { "label": "मा-र्यो", "tip": "Ma-ryo: a hit, the thrower wins" },
-    "tiryo": { "label": "ति-र्यो", "tip": "Ti-ryo: a miss, the thrower pays" }
+    "teeya": {
+      "label": "तीया",
+      "tip": "Teeya: seat 3"
+    },
+    "chauka": {
+      "label": "चौका",
+      "tip": "Chauka: seat 4"
+    },
+    "panja": {
+      "label": "पञ्जा",
+      "tip": "Panja: seat 5"
+    },
+    "chakka": {
+      "label": "छक्का",
+      "tip": "Chakka: seat 6"
+    },
+    "thini": {
+      "label": "ठिनी",
+      "tip": "Thini: the base stake, in chips"
+    },
+    "hate": {
+      "label": "हाते",
+      "tip": "Hate: the four players seated inside"
+    },
+    "chyakhe": {
+      "label": "च्याँखे",
+      "tip": "Chyakhe: outside bettors"
+    },
+    "maryo": {
+      "label": "मा-र्यो",
+      "tip": "Ma-ryo: a hit, the thrower wins"
+    },
+    "tiryo": {
+      "label": "ति-र्यो",
+      "tip": "Ti-ryo: a miss, the thrower pays"
+    }
   },
   "errors": {
     "bad-name": "यो नाम मिलेन: ३ देखि २० अक्षर, नेपाली वा अंग्रेजी अक्षर, अङ्क, खाली ठाउँ, _ वा -।",
@@ -121,5 +147,85 @@
     "seatGivenUp": "तपाईं टाढा हुँदा तपाईंको सिट छोडियो।",
     "loggedOut": "बाहिर निस्कनुभयो। नयाँ पाहुना नयाँ खाता हो, नयाँ चिपसहित।",
     "paused": "टेबल रोकियो: {{reason}}। चिप अन्तिम बचतमा जस्तै छन्।"
+  },
+  "play": {
+    "phaseEnds": "{{seconds}} सेकेन्ड",
+    "stake": "दाउ",
+    "multiplier": "×{{n}}",
+    "stakeTip": "Current stake in chips, and its multiplier",
+    "throwerMark": "फाल्ने पालो",
+    "throwerMarkTip": "Whose throw it is",
+    "seatNumber": "{{n}} नम्बर",
+    "empty": "खाली",
+    "bot": "बट",
+    "you": "तपाईं",
+    "away": "टाढा",
+    "chips": "{{chips}} चिप",
+    "reservedFor": "{{name}} का लागि आरक्षित",
+    "reservedForYou": "अर्को पालोका लागि तपाईंको",
+    "sit": "बस्नुहोस्",
+    "stand": "उठ्नुहोस्",
+    "cancelReservation": "आरक्षण रद्द",
+    "throw": "कौडा फाल्नुहोस्",
+    "yourThrow": "तपाईंको पालो! कौडा फाल्नुहोस्।",
+    "myChips": "मेरो चिप",
+    "seatedAs": "तपाईं {{seat}} मा हुनुहुन्छ",
+    "watching": "तपाईं च्याँखे हुनुहुन्छ",
+    "betAmount": "बाजीको रकम",
+    "betOn": "{{seat}} मा बाजी",
+    "yourBet": "तपाईंको बाजी: {{chips}} चिप, {{seat}} मा",
+    "clearBet": "बाजी हटाउनुहोस्",
+    "betsOnSeat": "बाजी {{chips}}",
+    "betsClosed": "बाजी राख्ने समय होइन",
+    "topUp": "निःशुल्क चिप लिनुहोस्",
+    "topUpHint": "बस्न कम्तीमा {{min}} चिप चाहिन्छ।",
+    "topUpCooldown": "अहिले मिल्दैन। {{time}} पछि फेरि प्रयास गर्नुहोस्।",
+    "topUpDone": "{{chips}} चिप थपियो।",
+    "log": "पालोहरू",
+    "logEmpty": "अहिलेसम्म कुनै पालो सकिएको छैन।",
+    "logThrower": "{{seat}} ले फाल्यो",
+    "logWinner": "{{seat}} जित्यो",
+    "gained": "{{name}} +{{chips}}",
+    "lost": "{{name}} −{{chips}}",
+    "stageWaiting": "कौडा फाल्न बाँकी",
+    "stageFaceUp": "{{n}} उत्तानो",
+    "stageLabel": "सोह्र कौडा: {{n}} उत्तानो",
+    "fairness": "निष्पक्षता",
+    "fairnessHint": "बाजी अघि सर्भरले बीउ (seed) को sha256 देखाउँछ, पालो सकिएपछि बीउ नै। यो ब्राउजरले आफैं जाँच्छ।",
+    "commitHash": "यो पालोको प्रतिबद्धता (sha256)",
+    "noCommit": "अहिले कुनै प्रतिबद्धता छैन।",
+    "seed": "खुलेको बीउ",
+    "computed": "यो ब्राउजरले निकालेको sha256",
+    "checkOk": "मिल्यो",
+    "checkBad": "मिलेन",
+    "checking": "जाँच्दै…",
+    "noRound": "अहिलेसम्म कुनै बीउ खुलेको छैन।",
+    "checkHash": "sha256(बीउ) = प्रतिबद्धता",
+    "checkPublished": "बाजी अघि देखाइएको प्रतिबद्धता नै",
+    "checkFaces": "बीउबाट उही कौडा र उही विजेता",
+    "notSeenPublished": "(यो पेज ढिलो जोडियो, प्रतिबद्धता देखेन)",
+    "wins": "जित्यो!"
+  },
+  "refusals": {
+    "wrong-phase": "यो कुरा अहिले गर्न मिल्दैन।",
+    "already-seated": "तपाईं पहिल्यै बस्नुभएको छ।",
+    "seat-taken": "त्यो सिटमा अरू कोही छ।",
+    "insufficient-chips": "पर्याप्त चिप छैन।",
+    "not-seated": "तपाईं बस्नुभएको छैन।",
+    "seated-cannot-bet": "हातेले बाजी राख्न मिल्दैन।",
+    "chyakhe-disabled": "यो टेबलमा च्याँखे बाजी छैन।",
+    "thrower-seat": "फाल्नेको सिटमा बाजी राख्न मिल्दैन।",
+    "empty-seat": "त्यो सिट खाली छ।",
+    "too-many-chyakhe": "धेरै च्याँखे भइसके।",
+    "thrower-cannot-cover": "फाल्नेसँग यति बाजी तिर्ने चिप छैन।",
+    "no-bet": "तपाईंको कुनै बाजी छैन।",
+    "not-thrower": "तपाईंको पालो होइन।",
+    "not-at-table": "तपाईं टेबलमा हुनुहुन्न।",
+    "table-full": "टेबल भरिएको छ।",
+    "table-paused": "टेबल रोकिएको छ।",
+    "topup-cooldown": "अहिले निःशुल्क चिप मिल्दैन।",
+    "topup-not-needed": "तपाईंसँग पर्याप्त चिप छ।",
+    "malformed": "अनुरोधमा गल्ती भयो।",
+    "unknown": "सर्भरले अस्वीकार गर्यो ({{code}})।"
   }
 }

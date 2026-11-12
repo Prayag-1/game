@@ -28,6 +28,7 @@ const child = spawn(process.execPath, [server], {
     KAUDA_WEB_DIST: dist,
     KAUDA_DATA_DIR: join(mkdtempSync(join(tmpdir(), "kauda-e2e-")), "pglite"),
     KAUDA_GUESTS_PER_HOUR: "1000",
+    KAUDA_FAST_ROUNDS: "1",
   },
 });
 child.on("exit", (code) => process.exit(code ?? 0));

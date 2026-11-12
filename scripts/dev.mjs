@@ -3,7 +3,7 @@
  * `pnpm dev`: the game server on http://127.0.0.1:3000 and the web client's
  * Vite dev server on http://127.0.0.1:5173, which proxies /session, /tables
  * and the /ws WebSocket to the game server (see packages/web/vite.config.ts).
- * Open http://127.0.0.1:5173/. The debug client stays at http://127.0.0.1:3000/.
+ * Open http://127.0.0.1:5173/.
  *
  * Ctrl+C stops both. If either exits, the other is stopped too.
  */

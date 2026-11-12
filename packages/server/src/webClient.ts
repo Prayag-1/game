@@ -36,7 +36,7 @@ const TYPES: Readonly<Record<string, string>> = {
 };
 
 /** Paths that belong to the server, never to the page. */
-const SERVER_PREFIXES = ["/session/", "/tables", "/ws/", "/matchmake/", "/debug", "/vendor/"];
+const SERVER_PREFIXES = ["/session/", "/tables", "/ws/", "/matchmake/"];
 
 /**
  * The production page's policy. `wsOrigins` are the ws:// or wss:// forms of

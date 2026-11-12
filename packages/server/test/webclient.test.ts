@@ -11,8 +11,8 @@ import { webContentSecurityPolicy, wsOriginsOf } from "../src/webClient.js";
 
 /**
  * The game server serving a built web client: the page under its strict
- * CSP, hashed assets, client-side routes, nothing outside dist/, the debug
- * client moved to /debug, and the Vite proxy's Origin accepted.
+ * CSP, hashed assets, client-side routes, nothing outside dist/, the
+ * server's own routes untouched, and the Vite proxy's Origin accepted.
  */
 const PROXY = "http://127.0.0.1:5173";
 let dev: DevServer;
@@ -108,16 +108,12 @@ describe("serving the built client", () => {
     expect((await http("/assets/no-extension")).status).toBe(404);
   });
 
-  it("leaves the server's own routes alone, and moves the debug client to /debug", async () => {
+  it("leaves the server's own routes alone", async () => {
     const tables = await http("/tables");
     expect(tables.status).toBe(200);
     expect(JSON.parse(tables.body)).toEqual({ tables: [] });
     expect((await http("/session/me")).status).toBe(401);
-    const debug = await http("/debug");
-    expect(debug.status).toBe(200);
-    expect(debug.body).toContain("Kauda");
-    expect(String(debug.headers["content-security-policy"])).toContain("'sha256-");
-    expect(dev.debugUrl).toBe(`http://${DEV_HOST}:${dev.port}/debug`);
+    expect((await http("/vendor/colyseus.js")).status).toBe(404); // the retired debug client's
   });
 
   it("still refuses a foreign Host header", async () => {
