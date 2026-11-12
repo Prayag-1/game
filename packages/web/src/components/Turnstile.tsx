@@ -89,6 +89,7 @@ export function Turnstile({ onToken, resetKey, siteKey = TURNSTILE_SITE_KEY }: P
             sitekey: siteKey,
             // Cloudflare has no Nepali; "auto" follows the browser.
             language: i18n.language === "en" ? "en" : "auto",
+            theme: "dark",
             callback: (token) => tokenHandler.current(token),
             "expired-callback": () => tokenHandler.current(null),
             "error-callback": () => tokenHandler.current(null),
@@ -117,9 +118,9 @@ export function Turnstile({ onToken, resetKey, siteKey = TURNSTILE_SITE_KEY }: P
   return (
     <div aria-label={t("signIn.humanCheck")} className="min-h-[65px]">
       <div ref={container} />
-      {state === "loading" && <p className="text-sm text-stone-500">{t("signIn.humanCheckLoading")}</p>}
+      {state === "loading" && <p className="text-sm text-ink-muted">{t("signIn.humanCheckLoading")}</p>}
       {state === "failed" && (
-        <p role="alert" className="text-sm text-red-800">
+        <p role="alert" className="text-sm text-sindoor-ink">
           {t("signIn.humanCheckFailed")}
         </p>
       )}

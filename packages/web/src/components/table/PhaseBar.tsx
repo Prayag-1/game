@@ -21,22 +21,24 @@ export interface PhaseBarProps {
   readonly multiplier: number;
 }
 
+/** A quiet strip over the board: the phase, its countdown, and the stake. */
 export function PhaseBar({ phase, phaseEndsAt, stake, multiplier }: PhaseBarProps) {
   const { t, i18n } = useTranslation();
   const seconds = useCountdown(phaseEndsAt);
   const fmt = numberFormat(i18n.language);
   return (
-    <div className="flex items-center gap-3 rounded-2xl bg-stone-900 px-3 py-2 text-amber-50">
-      <span className="font-semibold" data-testid="phase" data-phase={phase}>
+    <div className="flex items-center gap-3 rounded-full border border-line bg-panel px-4 py-1.5 text-sm shadow-panel backdrop-blur-md">
+      <span className="font-semibold text-ink" data-testid="phase" data-phase={phase}>
         {t(`phase.${phase}`)}
       </span>
       {seconds !== null && (
-        <span className="tabular-nums text-amber-200" data-testid="countdown">
+        <span className="text-brass tabular-nums" data-testid="countdown">
           {t("play.phaseEnds", { seconds: fmt.format(seconds) })}
         </span>
       )}
-      <span className="ml-auto tabular-nums" title={t("play.stakeTip")} data-testid="stake">
-        {t("play.stake")} {fmt.format(stake)} <span className="text-amber-300">{t("play.multiplier", { n: fmt.format(multiplier) })}</span>
+      <span className="ml-auto text-ink tabular-nums" title={t("play.stakeTip")} data-testid="stake">
+        <span className="text-ink-muted">{t("play.stake")}</span> <span className="font-semibold">{fmt.format(stake)}</span>{" "}
+        <span className="font-semibold text-brass">{t("play.multiplier", { n: fmt.format(multiplier) })}</span>
       </span>
     </div>
   );

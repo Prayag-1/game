@@ -3,13 +3,194 @@
 @import "@fontsource/noto-sans-devanagari/400.css";
 @import "@fontsource/noto-sans-devanagari/600.css";
 
+/*
+ * THE DESIGN TOKENS. Every colour in the app is defined here and nowhere else:
+ * components use these through Tailwind classes (bg-panel, text-brass, ...) or
+ * var(--color-*). Tailwind's own palette is switched off below, so a stray
+ * `bg-stone-200` renders nothing, and test/theme.test.ts fails on any colour
+ * literal or palette class in a component, and on any text/background pair
+ * here that drops below WCAG AA.
+ *
+ * The mood: a dark walnut board on the floor in low light, lit by a diyo.
+ */
 @theme {
   --font-sans: "Noto Sans Devanagari", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+
+  --color-*: initial;
+  --color-transparent: transparent;
+  --color-current: currentColor;
+
+  /* Surfaces */
+  --color-bg: #120d0a; /* the floor, near-black warm brown */
+  --color-wood: #2b150c; /* the board's median tone, under the texture */
+  --color-wood-light: #482e1b; /* the texture's brightest grain (99.9th percentile), for the contrast test */
+  --color-panel: rgb(22 15 10 / 0.72); /* translucent panels, over a backdrop blur */
+  --color-panel-strong: rgb(18 12 9 / 0.94); /* the bottom sheet, which sits over the board */
+  --color-line: rgb(242 232 213 / 0.12); /* 1px warm borders */
+  --color-line-strong: rgb(242 232 213 / 0.24);
+
+  /* Text */
+  --color-ink: #f2e8d5; /* warm ivory */
+  --color-ink-muted: #b5a58c;
+
+  /* Brass: highlights, the active thrower, focus rings, key numbers */
+  --color-brass: #c9a24a;
+  --color-brass-bright: #e3c06d;
+
+  /* Sindoor: the one red. Primary actions and the hit. */
+  --color-sindoor: #9e2a2b; /* button fill */
+  --color-sindoor-bright: #b3372f; /* button fill, hover */
+  --color-sindoor-ink: #e8806e; /* sindoor as text on the dark (the hit word, errors) */
+
+  /* Semantic only: the fairness tick and cross. Nothing decorative. */
+  --color-ok: #8fc39a;
+  --color-bad: #ec8f80;
+
+  /* The diyo's light: used only as a faint glow, never as a fill. */
+  --color-glow: #e3a050;
+
+  /* Cowrie shells */
+  --color-shell: #efe3c8;
+  --color-shell-light: #fbf5e8;
+  --color-shell-shade: #c2ab84;
+  --color-shell-slit: #3b2416;
+
+  --radius-panel: 0.875rem;
+  --radius-control: 0.625rem;
+
+  --shadow-panel: 0 10px 30px -12px rgb(0 0 0 / 0.7);
+  --shadow-glow-brass: 0 0 0 1px rgb(201 162 74 / 0.75), 0 0 18px 2px rgb(227 192 109 / 0.35);
+  --shadow-glow-sindoor: 0 6px 22px -6px rgb(158 42 43 / 0.8);
+
+  --animate-rise: rise 260ms ease-out both;
+  --animate-settle: settle 340ms ease-out both;
+  --animate-flicker: flicker 5s ease-in-out infinite alternate;
+
+  @keyframes rise {
+    from {
+      opacity: 0;
+      transform: translateY(6px);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+  @keyframes settle {
+    from {
+      opacity: 0;
+      transform: scale(0.92);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+  @keyframes flicker {
+    0% {
+      opacity: 0.85;
+    }
+    40% {
+      opacity: 1;
+    }
+    70% {
+      opacity: 0.9;
+    }
+    100% {
+      opacity: 0.97;
+    }
+  }
 }
 
-html {
-  -webkit-text-size-adjust: 100%;
+/* How strong the diyo glow is over the board. The contrast test reads it. */
+:root {
+  --board-glow: 22%;
+  color-scheme: dark;
 }
-body {
-  @apply min-h-dvh bg-amber-50 text-stone-900 antialiased;
+
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+  body {
+    @apply min-h-dvh bg-bg text-ink antialiased;
+    font-feature-settings: "kern";
+  }
+  /* The floor: walnut under a heavy vignette, fixed behind every screen. */
+  body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    background-color: var(--color-wood);
+    background-image:
+      radial-gradient(ellipse 120% 90% at 50% 40%, transparent 30%, color-mix(in srgb, var(--color-bg) 92%, transparent) 100%),
+      linear-gradient(color-mix(in srgb, var(--color-bg) 35%, transparent), color-mix(in srgb, var(--color-bg) 35%, transparent)),
+      url("./assets/walnut.webp");
+    background-size:
+      auto,
+      auto,
+      560px 560px;
+  }
+  :focus-visible {
+    outline: 2px solid var(--color-brass);
+    outline-offset: 2px;
+  }
+  ::selection {
+    background: color-mix(in srgb, var(--color-brass) 40%, transparent);
+  }
+}
+
+@layer components {
+  /* The diyo's pool of light, behind the shells. */
+  .diyo-glow {
+    background: radial-gradient(
+      ellipse 55% 50% at 50% 48%,
+      color-mix(in srgb, var(--color-glow) var(--board-glow), transparent) 0%,
+      transparent 70%
+    );
+  }
+
+  /* Cowrie shells, drawn in components/Shell.tsx. */
+  .shell-shadow {
+    fill: color-mix(in srgb, var(--color-bg) 60%, transparent);
+  }
+  .shell-back {
+    fill: var(--color-shell);
+    stroke: var(--color-shell-shade);
+    stroke-width: 0.4;
+  }
+  .shell-sheen {
+    fill: var(--color-shell-light);
+    opacity: 0.75;
+  }
+  .shell-base {
+    fill: var(--color-shell-shade);
+    stroke: color-mix(in srgb, var(--color-shell-slit) 45%, transparent);
+    stroke-width: 0.35;
+  }
+  .shell-lip {
+    fill: var(--color-shell);
+  }
+  .shell-slit {
+    fill: var(--color-shell-slit);
+  }
+  .shell-tooth {
+    stroke: var(--color-shell-shade);
+    stroke-width: 0.45;
+    stroke-linecap: round;
+  }
+}
+
+/* Motion is small and warm, and none at all for anyone who asks for none. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }

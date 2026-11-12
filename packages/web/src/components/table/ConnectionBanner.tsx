@@ -1,5 +1,6 @@
 import { useTranslation } from "react-i18next";
 import type { Connection } from "../../lib/tableStore";
+import { buttonPrimary } from "../ui";
 
 export interface ConnectionBannerProps {
   readonly conn: Connection;
@@ -12,9 +13,14 @@ export interface ConnectionBannerProps {
 export function ConnectionBanner({ conn, attempt, pausedReason, onReconnect }: ConnectionBannerProps) {
   const { t } = useTranslation();
   if (conn === "connected" || conn === "idle") return null;
-  const tone = conn === "connecting" || conn === "reconnecting" ? "bg-amber-200 text-amber-950" : "bg-red-100 text-red-900";
+  const tone = conn === "connecting" || conn === "reconnecting" ? "border-brass/50 text-brass" : "border-sindoor/70 text-sindoor-ink";
   return (
-    <div role="status" data-testid="conn-banner" data-conn={conn} className={`flex items-center gap-2 rounded-xl px-3 py-2 text-sm ${tone}`}>
+    <div
+      role="status"
+      data-testid="conn-banner"
+      data-conn={conn}
+      className={`animate-rise flex items-center gap-2 rounded-panel border bg-panel-strong px-3 py-2 text-sm shadow-panel backdrop-blur-md ${tone}`}
+    >
       <span>
         {conn === "reconnecting"
           ? t("table.status.reconnecting", { attempt })
@@ -23,7 +29,7 @@ export function ConnectionBanner({ conn, attempt, pausedReason, onReconnect }: C
             : t(`table.status.${conn}`)}
       </span>
       {conn === "replaced" && (
-        <button type="button" onClick={onReconnect} className="ml-auto rounded-lg bg-red-900 px-3 py-1 text-white">
+        <button type="button" onClick={onReconnect} className={`${buttonPrimary} ml-auto px-3 py-1 text-sm`}>
           {t("table.reconnect")}
         </button>
       )}

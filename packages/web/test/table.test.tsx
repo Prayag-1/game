@@ -239,7 +239,7 @@ describe("fairness check", () => {
     expect(screen.getByTestId("seed")).toHaveTextContent(SEED);
     expect(container.querySelectorAll('[data-check="ok"]')).toHaveLength(4); // summary + three checks
     expect(container.querySelectorAll('[data-check="bad"]')).toHaveLength(0);
-    expect(screen.getAllByRole("img", { name: "मिल्यो" })[0]).toHaveClass("text-green-700");
+    expect(screen.getAllByRole("img", { name: "मिल्यो" })[0]).toHaveClass("text-ok");
   });
 
   it("renders a failing check as red crosses", async () => {
@@ -247,7 +247,7 @@ describe("fairness check", () => {
     const result = await checkRound(tampered, HASH);
     const { container } = render(<Fairness commitHash={null} round={tampered} result={result} />);
     expect(container.querySelectorAll('[data-check="bad"]').length).toBeGreaterThanOrEqual(2);
-    expect(screen.getAllByRole("img", { name: "मिलेन" })[0]).toHaveClass("text-red-700");
+    expect(screen.getAllByRole("img", { name: "मिलेन" })[0]).toHaveClass("text-bad");
   });
 
   it("runs on every round the store receives, against the hash it saw published", async () => {
@@ -280,9 +280,9 @@ describe("fairness check", () => {
 // ----------------------------------------------------------- stage and seats
 
 describe("stage", () => {
-  it("draws sixteen shells, filled when up, with the count and the winner in Nepali", () => {
+  it("draws sixteen shells, slit side showing when up, with the count and the winner in Nepali", () => {
     render(<Stage result={{ faces: FACES, faceUp: 8, winningSeat: "chauka", hit: false }} pending={false} />);
-    const shells = screen.getByTestId("stage").querySelectorAll("circle");
+    const shells = screen.getByTestId("stage").querySelectorAll("[data-shell]");
     expect(shells).toHaveLength(16);
     expect(screen.getByTestId("stage").querySelectorAll('[data-shell="up"]')).toHaveLength(8);
     const result = screen.getByTestId("stage-result");
@@ -290,9 +290,20 @@ describe("stage", () => {
     expect(within(result).getByRole("button", { name: "चौका" })).toHaveAttribute("title", "Chauka: seat 4");
     expect(result).toHaveTextContent("जित्यो!");
     expect(within(result).getByRole("button", { name: "ति-र्यो" })).toBeInTheDocument();
+    // Face up shows the slit; face down the smooth back.
+    expect(screen.getByTestId("stage").querySelectorAll('[data-shell="up"] .shell-slit')).toHaveLength(8);
+    expect(screen.getByTestId("stage").querySelectorAll('[data-shell="down"] .shell-slit')).toHaveLength(0);
   });
 
-  it("shows empty shells while a round waits for its throw", () => {
+  it("shows the result word large, in sindoor for a hit", () => {
+    render(<Stage result={{ faces: FACES, faceUp: 8, winningSeat: "chauka", hit: true }} pending={false} />);
+    const word = screen.getByTestId("stage-result").querySelector("[data-result]");
+    expect(word).toHaveAttribute("data-result", "hit");
+    expect(word).toHaveTextContent("मा-र्यो");
+    expect(word).toHaveClass("text-sindoor-ink");
+  });
+
+  it("shows the shells gathered, face down, while a round waits for its throw", () => {
     render(<Stage result={{ faces: FACES, faceUp: 8, winningSeat: "chauka", hit: true }} pending />);
     expect(screen.getByTestId("stage").querySelectorAll('[data-shell="pending"]')).toHaveLength(16);
     expect(screen.queryByTestId("stage-result")).toBeNull();

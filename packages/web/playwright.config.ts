@@ -11,6 +11,8 @@ const PORT = Number(process.env.KAUDA_E2E_PORT ?? 3210);
 
 export default defineConfig({
   testDir: "e2e",
+  // The visual baselines have their own config (playwright.visual.config.ts).
+  testIgnore: ["visual/**"],
   timeout: 60_000,
   expect: { timeout: 15_000 },
   fullyParallel: false,

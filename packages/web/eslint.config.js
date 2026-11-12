@@ -34,7 +34,7 @@ const NO_HTML_INJECTION = [
 ];
 
 export default tseslint.config(
-  { ignores: ["dist/", "playwright-report/", "test-results/"] },
+  { ignores: ["dist/", "e2e/visual/dist/", "playwright-report/", "test-results/"] },
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {

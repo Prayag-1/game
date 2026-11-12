@@ -48,7 +48,9 @@
     "bots": "बट",
     "stake": "दाउ",
     "stakeTip": "Current stake, in chips",
-    "busy": "पर्खनुहोस्…"
+    "busy": "पर्खनुहोस्…",
+    "places": "{{humans}} मान्छे, {{bots}} बट, {{free}} ठाउँ खाली",
+    "codeHint": "साथीले पठाएको ६ अक्षरको कोड"
   },
   "phase": {
     "waiting": "पर्खँदै",
@@ -85,7 +87,8 @@
     "shareHint": "यो लिङ्क वा कोड पठाउनुहोस्।",
     "code": "कोड",
     "copy": "लिङ्क कपी गर्नुहोस्",
-    "copied": "कपी भयो"
+    "copied": "कपी भयो",
+    "details": "विवरण"
   },
   "terms": {
     "teeya": {

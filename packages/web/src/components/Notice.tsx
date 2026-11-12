@@ -10,8 +10,8 @@ export function Notice({ notice, tone = "info" }: { readonly notice: NoticeValue
       role={tone === "error" ? "alert" : "status"}
       className={
         tone === "error"
-          ? "rounded-lg bg-red-100 px-3 py-2 text-sm text-red-900"
-          : "rounded-lg bg-amber-100 px-3 py-2 text-sm text-amber-900"
+          ? "animate-rise rounded-control border border-sindoor/60 bg-panel-strong px-3 py-2 text-sm text-sindoor-ink backdrop-blur-md"
+          : "animate-rise rounded-control border border-brass/40 bg-panel-strong px-3 py-2 text-sm text-ink backdrop-blur-md"
       }
     >
       {t(notice.key, notice.params ?? {})}

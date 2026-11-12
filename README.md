@@ -98,9 +98,17 @@ connection; the old one says so and can take it back.
 after 2 minutes, private ones after 10 minutes, and the code dies with the
 table.
 
-The table screen has two layers: the game state around the edge, and the
-`Stage` in the middle (`packages/web/src/components/table/Stage.tsx`), which
-gets only props and draws the shells as circles until the 3D scene replaces it.
+The table screen has two layers: the board, with the seats at its edges, and
+the `Stage` in the middle (`packages/web/src/components/table/Stage.tsx`),
+which gets only props and draws the sixteen cowries in 2D until the 3D scene
+replaces it. Your actions, the round log and fairness sit in a bottom sheet
+on a phone and a side panel on a wide screen.
+
+The look (a dark walnut board in low light) lives in design tokens in
+`packages/web/src/index.css`, and nowhere else: Tailwind's own palette is
+switched off, and `test/theme.test.ts` fails on any colour named in a
+component and on any text/background pair below WCAG AA. Third-party assets
+and their licences are in `CREDITS.md`.
 
 The Turnstile **site** key is fixed at build time from
 `VITE_TURNSTILE_SITE_KEY`. Without it, the build uses Cloudflare's test key.
@@ -113,7 +121,15 @@ Tests:
 ```bash
 pnpm test                       # every package, including the web component tests
 pnpm --filter @kauda/web e2e    # Playwright, Chromium: real game server, production build, strict CSP
+pnpm --filter @kauda/web visual # screenshots of sign-in, lobby and table, phone and desktop, against baselines
 ```
+
+The visual baselines (`packages/web/e2e/visual/__screenshots__`) are rendered
+from fixed data, so they change only when the UI does. After a deliberate
+change, `pnpm --filter @kauda/web visual:update` accepts the new look; the
+diff of the PNGs then shows what moved. They are per platform (the committed
+ones are Windows); a Linux CI needs its own, made in the Playwright Docker
+image.
 
 Run `pnpm --filter @kauda/web e2e:install` once first to fetch Chromium. The
 end-to-end run needs internet access to Cloudflare for the Turnstile widget.

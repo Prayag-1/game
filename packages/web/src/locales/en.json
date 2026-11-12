@@ -47,7 +47,9 @@
     "bots": "bots",
     "stake": "Stake",
     "stakeTip": "Current stake, in chips",
-    "busy": "One moment…"
+    "busy": "One moment…",
+    "places": "{{humans}} people, {{bots}} bots, {{free}} places free",
+    "codeHint": "The 6-letter code a friend sent you"
   },
   "phase": {
     "waiting": "Waiting",
@@ -84,7 +86,8 @@
     "shareHint": "Send them this link or code.",
     "code": "Code",
     "copy": "Copy link",
-    "copied": "Copied"
+    "copied": "Copied",
+    "details": "Details"
   },
   "terms": {
     "teeya": {

@@ -1,5 +1,5 @@
 import { devices, expect, test } from "@playwright/test";
-import { chips, collectErrors, expectAtTable, expectCleanPage, mySeat, quickPlay, signIn, UI, watchPage } from "./helpers";
+import { chips, collectErrors, expectAtTable, expectCleanPage, mySeat, openSheet, quickPlay, signIn, UI, watchPage } from "./helpers";
 
 /**
  * Against the real game server, serving the production build under its
@@ -33,10 +33,11 @@ test("signs in under the strict CSP with an httpOnly cookie, reaches a table, lo
   // Four seats with their Nepali names, in a round that is going on.
   for (const seat of ["teeya", "chauka", "panja", "chakka"]) await expect(page.getByTestId(`seat-${seat}`)).toBeVisible();
   await expect(page.getByTestId("seat-teeya")).toContainText("तीया");
-  await expect(page.getByTestId("stage").locator("circle")).toHaveCount(16);
+  await expect(page.getByTestId("stage").locator("[data-shell]")).toHaveCount(16);
   await expect(page.getByTestId("chyakhe-list")).toContainText("E2E खेलाडी");
 
   // Rounds settle into the log, and the browser checks every seed.
+  await openSheet(page);
   const log = page.getByTestId("round-log");
   await expect(log.getByTestId("log-row").first()).toBeVisible({ timeout: 30_000 });
   await expect(log.locator('[data-check="ok"]').first()).toBeVisible();
@@ -78,6 +79,7 @@ test("sits, throws on their turn, chips move by the stake, a refresh keeps the s
   await throwButton.click();
 
   // My round settles. My chips move by exactly what the rules give for it.
+  await openSheet(page);
   const mine = page.locator('[data-testid="log-row"][data-my-throw="true"]').first();
   await expect(mine).toBeVisible({ timeout: 20_000 });
   expect(seen.has(await mine.getAttribute("data-round-id"))).toBe(false);

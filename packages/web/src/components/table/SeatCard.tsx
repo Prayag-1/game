@@ -25,58 +25,76 @@ export interface SeatCardProps {
   readonly onCancelReservation: () => void;
 }
 
-/** One inside seat: name and number, occupant, chips, and whose throw it is. */
+/**
+ * One inside seat, as a compact translucent panel at the board's edge: the
+ * seat's name, who sits there, their chips. The thrower glows brass.
+ */
 export function SeatCard(props: SeatCardProps) {
   const { t, i18n } = useTranslation();
   const { seat, player, isMe, isThrower, reservation, betsTotal, canSit, sitDisabled } = props;
   const fmt = numberFormat(i18n.language);
-  const ring = isThrower
-    ? "ring-4 ring-amber-400"
+  const edge = isThrower
+    ? "border-brass/70 shadow-glow-brass"
     : reservation !== null
-      ? "outline-2 outline-dashed outline-sky-600"
-      : "";
+      ? "border-transparent outline-1 outline-dashed outline-brass/60 shadow-panel"
+      : isMe
+        ? "border-line-strong shadow-panel"
+        : "border-line shadow-panel";
   return (
     <article
       data-testid={`seat-${seat}`}
       data-thrower={isThrower ? "true" : undefined}
       data-me={isMe ? "true" : undefined}
       aria-label={t(`terms.${seat}.label`)}
-      className={`relative flex min-w-0 flex-col gap-0.5 rounded-xl p-2 text-sm shadow-sm ${isMe ? "bg-amber-100" : "bg-white"} ${ring}`}
+      className={`relative flex min-w-0 flex-col gap-0.5 rounded-panel border bg-panel px-2 pb-2 text-sm backdrop-blur-md transition-shadow duration-300 lg:px-3 ${isThrower ? "pt-3.5" : "pt-1.5 lg:pt-2"} ${edge}`}
     >
       {isThrower && (
         <span
           title={t("play.throwerMarkTip")}
-          className="absolute -top-2.5 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-full bg-amber-400 px-2 text-xs font-semibold text-stone-900"
+          className="animate-rise absolute -top-2.5 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-full bg-brass px-2 text-[0.7rem] leading-5 font-semibold text-bg"
           data-testid="thrower-mark"
         >
           {t("play.throwerMark")}
         </span>
       )}
       <div className="flex items-baseline justify-between gap-1">
-        <Term id={seat} />
-        <span className="text-xs text-stone-500">{t("play.seatNumber", { n: fmt.format(SEAT_NUMBER[seat]) })}</span>
+        <span className="text-base leading-tight text-ink lg:text-lg">
+          <Term id={seat} />
+        </span>
+        <span className="text-xs text-ink-muted tabular-nums">
+          <span aria-hidden="true">{fmt.format(SEAT_NUMBER[seat])}</span>
+          <span className="sr-only">{t("play.seatNumber", { n: fmt.format(SEAT_NUMBER[seat]) })}</span>
+        </span>
       </div>
-      <div className="truncate font-semibold" data-testid="occupant">
-        {player === null ? <span className="font-normal text-stone-500">{t("play.empty")}</span> : player.name}
-      </div>
-      <div className="flex flex-wrap gap-1 text-xs">
-        {player?.isBot === true && <span className="rounded bg-stone-200 px-1">{t("play.bot")}</span>}
-        {isMe && <span className="rounded bg-amber-300 px-1">{t("play.you")}</span>}
-        {player !== null && !player.isBot && !player.connected && <span className="rounded bg-red-100 px-1 text-red-900">{t("play.away")}</span>}
+      <div className="truncate leading-tight text-ink" data-testid="occupant">
+        {player === null ? <span className="text-ink-muted">{t("play.empty")}</span> : player.name}
       </div>
       {player !== null && (
-        <div className="text-xs tabular-nums" data-testid="seat-chips">
+        <div className="font-semibold text-brass tabular-nums" data-testid="seat-chips">
           {t("play.chips", { chips: fmt.format(player.chips) })}
         </div>
       )}
-      {betsTotal > 0 && <div className="text-xs text-emerald-800">{t("play.betsOnSeat", { chips: fmt.format(betsTotal) })}</div>}
+      {(player?.isBot === true || isMe || (player !== null && !player.isBot && !player.connected)) && (
+        <div className="flex flex-wrap gap-1 text-[0.7rem] leading-4">
+          {player?.isBot === true && <span className="text-ink-muted">{t("play.bot")}</span>}
+          {isMe && <span className="rounded-full border border-brass/50 px-1.5 text-brass">{t("play.you")}</span>}
+          {player !== null && !player.isBot && !player.connected && (
+            <span className="rounded-full border border-dashed border-line-strong px-1.5 text-ink-muted">{t("play.away")}</span>
+          )}
+        </div>
+      )}
+      {betsTotal > 0 && <div className="text-xs text-ink-muted tabular-nums">{t("play.betsOnSeat", { chips: fmt.format(betsTotal) })}</div>}
       {reservation !== null && (
-        <div className="rounded bg-sky-100 px-1 text-xs text-sky-900" data-testid="reservation">
+        <div className="text-xs text-brass" data-testid="reservation">
           {reservation.mine ? t("play.reservedForYou") : t("play.reservedFor", { name: reservation.name })}
         </div>
       )}
       {reservation?.mine === true ? (
-        <button type="button" onClick={props.onCancelReservation} className="mt-1 rounded-lg border border-sky-700 px-2 py-1 text-xs text-sky-900">
+        <button
+          type="button"
+          onClick={props.onCancelReservation}
+          className="mt-1 rounded-control border border-line-strong px-2 py-1 text-xs text-ink-muted transition-colors hover:text-ink"
+        >
           {t("play.cancelReservation")}
         </button>
       ) : (
@@ -85,7 +103,7 @@ export function SeatCard(props: SeatCardProps) {
             type="button"
             onClick={props.onSit}
             disabled={sitDisabled}
-            className="mt-1 rounded-lg bg-orange-800 px-2 py-1 text-xs font-semibold text-white disabled:opacity-40"
+            className="mt-1 rounded-control border border-brass/60 px-2 py-1 text-xs font-semibold text-brass transition-colors hover:border-brass-bright hover:text-brass-bright disabled:opacity-40"
           >
             {t("play.sit")}
           </button>

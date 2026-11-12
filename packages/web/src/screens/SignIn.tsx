@@ -1,7 +1,9 @@
 import { useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { Notice, errorNotice } from "../components/Notice";
+import { ShellRow } from "../components/Shell";
 import { Turnstile } from "../components/Turnstile";
+import { buttonPrimary, input, panel } from "../components/ui";
 import { useSession, type Notice as NoticeValue } from "../lib/session";
 
 /** A guest: a name and a Turnstile token, posted to /session/guest. */
@@ -34,16 +36,18 @@ export function SignIn({ siteKey }: { readonly siteKey?: string }) {
   }
 
   return (
-    <main className="mx-auto flex max-w-md flex-col gap-4 px-4 py-6">
-      <div>
-        <h2 className="text-2xl font-semibold">{t("signIn.title")}</h2>
-        <p className="mt-1 text-stone-700">{t("signIn.intro")}</p>
+    <main className="mx-auto flex min-h-[calc(100dvh-3.5rem)] max-w-md flex-col justify-center gap-5 px-4 py-8">
+      <div className="diyo-glow -mx-8 flex flex-col items-center gap-2 px-8 py-6 text-center">
+        <ShellRow className="h-7" />
+        <p className="text-sm tracking-wide text-ink-muted">{t("app.tagline")}</p>
+        <h2 className="text-3xl font-semibold text-ink">{t("signIn.title")}</h2>
+        <p className="text-ink-muted">{t("signIn.intro")}</p>
       </div>
       <Notice notice={notice} />
       {pendingCode !== null && <Notice notice={{ key: "signIn.pendingCode", params: { code: pendingCode } }} />}
-      <form onSubmit={(e) => void submit(e)} className="flex flex-col gap-4 rounded-2xl bg-white p-4 shadow-sm" noValidate>
-        <div className="flex flex-col gap-1">
-          <label htmlFor="guest-name" className="font-semibold">
+      <form onSubmit={(e) => void submit(e)} className={`${panel} flex flex-col gap-4 p-5`} noValidate>
+        <div className="flex flex-col gap-1.5">
+          <label htmlFor="guest-name" className="font-semibold text-ink">
             {t("signIn.nameLabel")}
           </label>
           <input
@@ -56,22 +60,18 @@ export function SignIn({ siteKey }: { readonly siteKey?: string }) {
             autoCapitalize="words"
             enterKeyHint="go"
             aria-describedby="name-hint"
-            className="rounded-lg border border-stone-300 px-3 py-3 text-lg focus:border-orange-700 focus:outline-none"
+            className={`${input} py-3 text-lg`}
           />
-          <span id="name-hint" className="text-sm text-stone-600">
+          <span id="name-hint" className="text-sm text-ink-muted">
             {t("signIn.nameHint")}
           </span>
         </div>
         <Turnstile onToken={setToken} resetKey={resetKey} {...(siteKey === undefined ? {} : { siteKey })} />
         <Notice notice={error} tone="error" />
-        <button
-          type="submit"
-          disabled={!canSubmit}
-          className="rounded-xl bg-orange-800 px-4 py-3 text-lg font-semibold text-white disabled:opacity-50"
-        >
+        <button type="submit" disabled={!canSubmit} className={`${buttonPrimary} py-3 text-lg`}>
           {busy ? t("signIn.submitting") : t("signIn.submit")}
         </button>
-        <p className="text-xs text-stone-600">{t("signIn.guestNote")}</p>
+        <p className="text-xs text-ink-muted">{t("signIn.guestNote")}</p>
       </form>
     </main>
   );

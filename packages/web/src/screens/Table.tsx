@@ -1,6 +1,6 @@
 import { numberFormat } from "../lib/format";
 import { TURN_ORDER, type SeatId } from "@kauda/rules";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router";
 import { errorNotice } from "../components/Notice";
@@ -13,24 +13,29 @@ import { SeatCard } from "../components/table/SeatCard";
 import { Stage, type StageResult } from "../components/table/Stage";
 import { TopUp } from "../components/table/TopUp";
 import { Term } from "../components/Term";
+import { buttonPrimary, buttonQuiet, eyebrow, input } from "../components/ui";
 import type { TableView } from "../lib/protocol";
 import { useSession } from "../lib/session";
 import { claimTopUp, leaveTable, resume, send } from "../lib/table";
 import { clearRefusal, myBetIn, myPlayerIn, myReservationIn, mySeatIn, useTable } from "../lib/tableStore";
 
 /**
- * The table, in two layers. The game-state layer (seats, chips, bets,
- * controls, log) reads the store and stays. The centre is <Stage>, which only
- * gets props, so the 3D scene can replace it without touching the rest.
+ * The table, in two layers. The board (seats at its edges, the shells in the
+ * middle) is the hero and gets the space. Everything I do and read (my
+ * actions, the round log, fairness, the chyakhe) sits in one sheet: a
+ * collapsible bottom sheet on a phone, a side panel on a wide screen.
+ *
+ * The centre is <Stage>, which only gets props, so the 3D scene can replace
+ * it without touching the rest.
  */
 
 /** Screen slots, going anticlockwise from the bottom: bottom, right, top, left. */
 type Slot = "bottom" | "right" | "top" | "left";
 const SLOTS: readonly Slot[] = ["bottom", "right", "top", "left"];
 const SLOT_CLASS: Record<Slot, string> = {
-  bottom: "col-start-2 row-start-3",
+  bottom: "col-start-2 row-start-3 w-full max-w-44 justify-self-center lg:max-w-52",
   right: "col-start-3 row-start-2 self-center",
-  top: "col-start-2 row-start-1",
+  top: "col-start-2 row-start-1 w-full max-w-44 justify-self-center lg:max-w-52",
   left: "col-start-1 row-start-2 self-center",
 };
 
@@ -51,6 +56,9 @@ function stageResult(view: TableView): { result: StageResult | null; pending: bo
     pending: view.phase === "betting" || view.phase === "throwing",
   };
 }
+
+/** Header is h-14; the table fills the rest of the viewport, inside the safe area. */
+const FILL_VIEWPORT = "h-[calc(100dvh-3.5rem-env(safe-area-inset-bottom))]";
 
 export function TableScreen() {
   const { t, i18n } = useTranslation();
@@ -88,9 +96,9 @@ export function TableScreen() {
   const banner = <ConnectionBanner conn={s.conn} attempt={s.attempt} pausedReason={s.pausedReason} onReconnect={() => void resume()} />;
   if (view === null) {
     return (
-      <main className="mx-auto flex max-w-3xl flex-col gap-3 px-4 py-4">
+      <main className="mx-auto flex max-w-3xl flex-col gap-3 px-4 py-6">
         {banner}
-        <p className="text-stone-600">{t("table.waitingForState")}</p>
+        <p className="text-ink-muted">{t("table.waitingForState")}</p>
       </main>
     );
   }
@@ -109,116 +117,181 @@ export function TableScreen() {
   const refusal =
     s.refusal === null ? null : i18n.exists(`refusals.${s.refusal.reason}`) ? t(`refusals.${s.refusal.reason}`) : t("refusals.unknown", { code: s.refusal.reason });
 
-  return (
-    <main className="mx-auto flex max-w-3xl flex-col gap-3 px-3 py-3">
-      {banner}
-      <PhaseBar phase={view.phase} phaseEndsAt={view.phaseEndsAt} stake={view.stake} multiplier={multiplier} />
-
-      {/* Seats around the stage, anticlockwise in turn order. */}
-      <section className="grid grid-cols-[minmax(0,1fr)_minmax(0,1.5fr)_minmax(0,1fr)] grid-rows-[auto_auto_auto] gap-2" aria-label={t("table.seats")}>
-        {TURN_ORDER.map((seat) => {
-          const player = view.seats[seat];
-          const reservedBy = view.reservations.find((r) => r.seat === seat)?.playerId;
-          const humanHere = player !== null && !player.isBot;
-          return (
-            <div key={seat} className={SLOT_CLASS[slots[seat]]}>
-              <SeatCard
-                seat={seat}
-                player={player}
-                isMe={player !== null && player.playerId === myId}
-                isThrower={view.thrower === seat && view.phase !== "waiting"}
-                reservation={reservedBy === undefined ? null : { name: s.names[reservedBy] ?? "?", mine: reservedBy === myId }}
-                betsTotal={view.bets.filter((b) => b.seat === seat).reduce((sum, b) => sum + b.chips, 0)}
-                canSit={mySeat === null && !humanHere && (reservedBy === undefined || reservedBy === myId)}
-                sitDisabled={myChips < minToSit}
-                onSit={() => command({ type: "sit", seat })}
-                onCancelReservation={() => command({ type: "stand" })}
-              />
-            </div>
-          );
-        })}
-        <div className="col-start-2 row-start-2 aspect-square">
-          <Stage {...stageResult(view)} />
+  const actions = (
+    <>
+      {mySeat !== null ? (
+        <div className="flex flex-col gap-2">
+          {myThrow && <p className="animate-rise font-semibold text-brass">{t("play.yourThrow")}</p>}
+          <div className="flex gap-2">
+            <button
+              type="button"
+              disabled={!myThrow}
+              onClick={() => command({ type: "throw" })}
+              className={`${buttonPrimary} flex-1 py-3 text-lg ${myThrow ? "ring-2 ring-brass/70" : ""}`}
+            >
+              {t("play.throw")}
+            </button>
+            <button type="button" onClick={() => command({ type: "stand" })} className={buttonQuiet}>
+              {t("play.stand")}
+            </button>
+          </div>
         </div>
-      </section>
+      ) : (
+        <BetControls
+          phase={view.phase}
+          thrower={view.thrower}
+          occupied={occupied}
+          thini={view.rules.thini}
+          myChips={myChips}
+          myBet={myBet}
+          chyakheEnabled={view.rules.chyakheEnabled}
+          onBet={(seat, chips) => command({ type: "placeBet", seat, chips })}
+          onClear={() => command({ type: "clearBet" })}
+        />
+      )}
+      {myReservation !== null && mySeat === null && (
+        <p className="text-sm text-brass">
+          <Term id={myReservation} />: {t("play.reservedForYou")}
+        </p>
+      )}
+      {refusal !== null && (
+        <p
+          role="alert"
+          className="animate-rise rounded-control border border-sindoor/60 bg-sindoor/15 px-3 py-1.5 text-sm text-sindoor-ink"
+          data-testid="refusal"
+          data-reason={s.refusal?.reason}
+        >
+          {refusal}
+        </p>
+      )}
+      {s.welcome !== null && mySeat === null && myChips < minToSit && <TopUp minChipsToSit={minToSit} result={s.topUp} onClaim={claimTopUp} />}
+    </>
+  );
+
+  return (
+    <main className={`relative mx-auto flex ${FILL_VIEWPORT} w-full max-w-7xl flex-col lg:flex-row lg:gap-6 lg:px-6 lg:py-4`}>
+      {/* The board. */}
+      <div className="flex min-h-0 flex-1 flex-col gap-2 px-3 pt-2 pb-2 lg:p-0">
+        {banner}
+        <PhaseBar phase={view.phase} phaseEndsAt={view.phaseEndsAt} stake={view.stake} multiplier={multiplier} />
+        <section
+          className="mx-auto grid min-h-0 w-full max-w-4xl flex-1 grid-cols-[5.5rem_minmax(0,1fr)_5.5rem] grid-rows-[auto_minmax(0,1fr)_auto] gap-x-2 gap-y-3 pt-2 sm:grid-cols-[7.5rem_minmax(0,1fr)_7.5rem] lg:grid-cols-[10rem_minmax(0,1fr)_10rem]"
+          aria-label={t("table.seats")}
+        >
+          {TURN_ORDER.map((seat) => {
+            const player = view.seats[seat];
+            const reservedBy = view.reservations.find((r) => r.seat === seat)?.playerId;
+            const humanHere = player !== null && !player.isBot;
+            return (
+              <div key={seat} className={`min-w-0 ${SLOT_CLASS[slots[seat]]}`}>
+                <SeatCard
+                  seat={seat}
+                  player={player}
+                  isMe={player !== null && player.playerId === myId}
+                  isThrower={view.thrower === seat && view.phase !== "waiting"}
+                  reservation={reservedBy === undefined ? null : { name: s.names[reservedBy] ?? "?", mine: reservedBy === myId }}
+                  betsTotal={view.bets.filter((b) => b.seat === seat).reduce((sum, b) => sum + b.chips, 0)}
+                  canSit={mySeat === null && !humanHere && (reservedBy === undefined || reservedBy === myId)}
+                  sitDisabled={myChips < minToSit}
+                  onSit={() => command({ type: "sit", seat })}
+                  onCancelReservation={() => command({ type: "stand" })}
+                />
+              </div>
+            );
+          })}
+          <div className="col-start-2 row-start-2 min-h-0">
+            <Stage {...stageResult(view)} />
+          </div>
+        </section>
+      </div>
 
       {/* Me, and what I can do. */}
-      <section className="flex flex-col gap-3 rounded-2xl bg-white p-3 shadow-sm">
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-          <span className="text-sm">
-            {mySeat === null ? (
-              <>
-                <Term id="chyakhe" />
-              </>
-            ) : (
-              t("play.seatedAs", { seat: t(`terms.${mySeat}.label`) })
-            )}
-          </span>
-          <span className="font-semibold tabular-nums" data-testid="table-chips" data-chips={myChips}>
-            {t("play.myChips")}: {fmt.format(myChips)}
-          </span>
-          <button type="button" onClick={() => void leaveTable().then(() => navigate("/"))} className="ml-auto rounded-lg border-2 border-orange-800 px-3 py-1 text-sm font-semibold text-orange-900">
-            {t("table.leave")}
-          </button>
-        </div>
-
-        {mySeat !== null ? (
-          <div className="flex flex-col gap-2">
-            {myThrow && <p className="font-semibold text-orange-900">{t("play.yourThrow")}</p>}
-            <div className="flex gap-2">
-              <button
-                type="button"
-                disabled={!myThrow}
-                onClick={() => command({ type: "throw" })}
-                className="flex-1 rounded-xl bg-orange-800 px-4 py-3 text-lg font-semibold text-white disabled:bg-stone-300 disabled:text-stone-600"
-              >
-                {t("play.throw")}
-              </button>
-              <button type="button" onClick={() => command({ type: "stand" })} className="rounded-xl border-2 border-stone-500 px-4 py-2 font-semibold">
-                {t("play.stand")}
-              </button>
-            </div>
-          </div>
-        ) : (
-          <BetControls
-            phase={view.phase}
-            thrower={view.thrower}
-            occupied={occupied}
-            thini={view.rules.thini}
-            myChips={myChips}
-            myBet={myBet}
-            chyakheEnabled={view.rules.chyakheEnabled}
-            onBet={(seat, chips) => command({ type: "placeBet", seat, chips })}
-            onClear={() => command({ type: "clearBet" })}
-          />
-        )}
-        {myReservation !== null && mySeat === null && (
-          <p className="text-sm text-sky-900">
-            <Term id={myReservation} />: {t("play.reservedForYou")}
-          </p>
-        )}
-        {refusal !== null && (
-          <p role="alert" className="rounded-lg bg-red-100 px-3 py-1.5 text-sm text-red-900" data-testid="refusal" data-reason={s.refusal?.reason}>
-            {refusal}
-          </p>
-        )}
-      </section>
-
-      {s.welcome !== null && mySeat === null && myChips < minToSit && <TopUp minChipsToSit={minToSit} result={s.topUp} onClaim={claimTopUp} />}
-
-      {s.shareUrl !== null && s.code !== null && <Share url={s.shareUrl} code={s.code} />}
-
-      <RoundLog rounds={s.rounds} names={s.names} fairness={s.fairness} myId={myId} />
-      <Fairness
-        commitHash={view.phase === "betting" || view.phase === "throwing" ? view.commitHash : null}
-        round={latest}
-        result={latest === null ? undefined : s.fairness[latest.roundId]}
-      />
-      <Chyakhe players={view.chyakhe} bets={view.bets} myId={myId} />
-      <p className="text-xs text-stone-500" data-testid="house-rules" data-ghanti={view.rules.ghantiChips}>
-        <Term id="thini" />: {fmt.format(view.rules.thini)}
-      </p>
+      <Sheet
+        summary={
+          <>
+            <span className="min-w-0 truncate text-sm text-ink-muted">
+              {mySeat === null ? <Term id="chyakhe" /> : t("play.seatedAs", { seat: t(`terms.${mySeat}.label`) })}
+            </span>
+            <span className="font-semibold text-brass tabular-nums" data-testid="table-chips" data-chips={myChips}>
+              <span className="sr-only">{t("play.myChips")}: </span>
+              {fmt.format(myChips)} <span className="text-xs font-normal text-ink-muted">{t("header.chips")}</span>
+            </span>
+            <button type="button" onClick={() => void leaveTable().then(() => navigate("/"))} className={`${buttonQuiet} ml-auto px-2.5 py-1 text-sm`}>
+              {t("table.leave")}
+            </button>
+          </>
+        }
+        actions={actions}
+      >
+        {s.shareUrl !== null && s.code !== null && <Share url={s.shareUrl} code={s.code} />}
+        <RoundLog rounds={s.rounds} names={s.names} fairness={s.fairness} myId={myId} />
+        <Fairness
+          commitHash={view.phase === "betting" || view.phase === "throwing" ? view.commitHash : null}
+          round={latest}
+          result={latest === null ? undefined : s.fairness[latest.roundId]}
+        />
+        <Chyakhe players={view.chyakhe} bets={view.bets} myId={myId} />
+        <p className="text-xs text-ink-muted" data-testid="house-rules" data-ghanti={view.rules.ghantiChips}>
+          <Term id="thini" />: <span className="tabular-nums">{fmt.format(view.rules.thini)}</span>
+        </p>
+      </Sheet>
     </main>
+  );
+}
+
+/**
+ * On a phone: a bottom sheet. The summary row and my actions always show;
+ * the rest opens with the handle, and the open sheet slides up over the
+ * board (never squashing it) until it is closed again: the handle, a tap on
+ * the dimmed board, or Escape. On a wide screen: a side panel, all open.
+ */
+function Sheet({ summary, actions, children }: { readonly summary: ReactNode; readonly actions: ReactNode; readonly children: ReactNode }) {
+  const { t } = useTranslation();
+  const [open, setOpen] = useState(false);
+  const detailsId = useId();
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open]);
+  return (
+    <>
+      {open && <div aria-hidden="true" onClick={() => setOpen(false)} className="animate-rise absolute inset-0 z-20 bg-bg/55 lg:hidden" />}
+      <aside
+        className={`flex shrink-0 flex-col rounded-t-[1.25rem] border-t border-line-strong bg-panel-strong shadow-panel backdrop-blur-md lg:static lg:max-h-none lg:w-[22rem] lg:rounded-panel lg:border lg:border-line lg:bg-panel xl:w-[24rem] ${
+          open ? "absolute inset-x-0 bottom-0 z-30 max-h-[82%]" : ""
+        }`}
+        data-testid="sheet"
+        data-open={open ? "true" : "false"}
+      >
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+        aria-controls={detailsId}
+        className="flex flex-col items-center gap-0.5 pt-1.5 pb-0.5 text-xs text-ink-muted transition-colors hover:text-ink lg:hidden"
+        data-testid="sheet-toggle"
+      >
+        <span aria-hidden="true" className="h-1 w-10 rounded-full bg-line-strong" />
+        <span>
+          {t("table.details")} <span aria-hidden="true">{open ? "▾" : "▴"}</span>
+        </span>
+      </button>
+      <div className="flex flex-col gap-3 px-3 pt-1 pb-3 lg:px-4 lg:pt-4">
+        <div className="flex items-center gap-x-3">{summary}</div>
+        {actions}
+      </div>
+      <div
+        id={detailsId}
+        className={`${open ? "flex" : "hidden"} animate-rise min-h-0 flex-1 flex-col gap-4 overflow-y-auto border-t border-line px-3 py-3 lg:flex lg:px-4`}
+      >
+        {children}
+      </div>
+      </aside>
+    </>
   );
 }
 
@@ -227,21 +300,21 @@ function Chyakhe({ players, bets, myId }: { readonly players: TableView["chyakhe
   const { t, i18n } = useTranslation();
   const fmt = numberFormat(i18n.language);
   return (
-    <section className="rounded-2xl bg-white p-3 text-sm shadow-sm">
-      <h3 className="font-semibold">
-        <Term id="chyakhe" /> ({fmt.format(players.length)})
+    <section className="flex flex-col gap-1 text-sm">
+      <h3 className={eyebrow}>
+        <Term id="chyakhe" /> <span className="tabular-nums">({fmt.format(players.length)})</span>
       </h3>
-      <ul className="mt-1 flex flex-col gap-0.5" data-testid="chyakhe-list">
+      <ul className="flex flex-col gap-0.5" data-testid="chyakhe-list">
         {players.map((p) => {
           const bet = bets.find((b) => b.playerId === p.playerId);
           return (
-            <li key={p.playerId} className="flex flex-wrap items-baseline gap-x-2">
-              <span className="truncate font-semibold">{p.name}</span>
-              {p.isBot && <span className="rounded bg-stone-200 px-1 text-xs">{t("play.bot")}</span>}
-              {p.playerId === myId && <span className="rounded bg-amber-300 px-1 text-xs">{t("play.you")}</span>}
-              <span className="text-xs tabular-nums">{t("play.chips", { chips: fmt.format(p.chips) })}</span>
+            <li key={p.playerId} className="flex flex-wrap items-baseline gap-x-2 text-ink">
+              <span className="truncate">{p.name}</span>
+              {p.isBot && <span className="text-[0.7rem] text-ink-muted">{t("play.bot")}</span>}
+              {p.playerId === myId && <span className="rounded-full border border-brass/50 px-1.5 text-[0.7rem] text-brass">{t("play.you")}</span>}
+              <span className="text-xs text-ink-muted tabular-nums">{t("play.chips", { chips: fmt.format(p.chips) })}</span>
               {bet !== undefined && (
-                <span className="text-xs text-emerald-800">
+                <span className="text-xs text-brass tabular-nums">
                   {fmt.format(bet.chips)} → <Term id={bet.seat} />
                 </span>
               )}
@@ -266,15 +339,18 @@ function Share({ url, code }: { readonly url: string; readonly code: string }) {
     }
   };
   return (
-    <section className="flex flex-col gap-2 rounded-2xl bg-white p-3 shadow-sm" data-testid="share">
-      <h3 className="font-semibold">{t("table.shareTitle")}</h3>
-      <p className="text-sm text-stone-600">{t("table.shareHint")}</p>
-      <p>
-        {t("table.code")}: <span className="font-mono text-xl tracking-widest" data-testid="share-code">{code}</span>
+    <section className="flex flex-col gap-2 rounded-control border border-brass/35 bg-brass/5 p-3" data-testid="share">
+      <h3 className="font-semibold text-ink">{t("table.shareTitle")}</h3>
+      <p className="text-sm text-ink-muted">{t("table.shareHint")}</p>
+      <p className="text-ink">
+        {t("table.code")}:{" "}
+        <span className="font-mono text-xl tracking-[0.25em] text-brass" data-testid="share-code">
+          {code}
+        </span>
       </p>
       <div className="flex gap-2">
-        <input readOnly value={url} aria-label={t("table.shareTitle")} data-testid="share-url" className="min-w-0 flex-1 rounded-lg border border-stone-300 px-2 py-1 text-sm" />
-        <button type="button" onClick={() => void copy()} className="rounded-lg bg-orange-800 px-3 py-1 text-sm font-semibold text-white">
+        <input readOnly value={url} aria-label={t("table.shareTitle")} data-testid="share-url" className={`${input} min-w-0 flex-1 py-1 text-sm`} />
+        <button type="button" onClick={() => void copy()} className={`${buttonQuiet} text-sm`}>
           {copied ? t("table.copied") : t("table.copy")}
         </button>
       </div>

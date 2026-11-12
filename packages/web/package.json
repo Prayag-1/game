@@ -12,7 +12,9 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "e2e": "pnpm --dir ../.. exec turbo run build --filter=@kauda/web --filter=@kauda/server && playwright test",
-    "e2e:install": "playwright install chromium"
+    "e2e:install": "playwright install chromium",
+    "visual": "pnpm --dir ../.. exec turbo run build --filter=@kauda/rules && playwright test --config playwright.visual.config.ts",
+    "visual:update": "pnpm --dir ../.. exec turbo run build --filter=@kauda/rules && playwright test --config playwright.visual.config.ts --update-snapshots"
   },
   "dependencies": {
     "@colyseus/sdk": "0.18.6",

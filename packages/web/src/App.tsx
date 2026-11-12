@@ -33,7 +33,7 @@ export function App() {
     <div className="min-h-dvh pb-[env(safe-area-inset-bottom)]">
       <Header />
       {status === "loading" ? (
-        <p className="p-6 text-center text-stone-600" role="status">
+        <p className="p-6 text-center text-ink-muted" role="status">
           {t("lobby.busy")}
         </p>
       ) : status === "signedOut" ? (

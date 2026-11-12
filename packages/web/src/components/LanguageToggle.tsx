@@ -11,7 +11,7 @@ export function LanguageToggle() {
       onClick={() => setLanguage(next)}
       aria-label={t("header.languageLabel")}
       lang={next}
-      className="rounded-full border border-amber-200/60 px-3 py-1 text-sm text-amber-50 hover:bg-amber-50/10"
+      className="rounded-full border border-line-strong px-3 py-1 text-sm text-ink-muted transition-colors hover:border-brass/60 hover:text-ink"
     >
       {t("header.language")}
     </button>

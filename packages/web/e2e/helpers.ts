@@ -72,3 +72,13 @@ export async function mySeat(page: Page): Promise<string> {
   await expect(card).toHaveCount(1, { timeout: 30_000 });
   return ((await card.getAttribute("data-testid")) ?? "").replace("seat-", "");
 }
+
+/**
+ * On a phone the round log, fairness and the chyakhe list sit in a bottom
+ * sheet that starts collapsed; open it. On a wide screen it is always open.
+ */
+export async function openSheet(page: Page): Promise<void> {
+  const toggle = page.getByTestId("sheet-toggle");
+  if ((await toggle.isVisible()) && (await toggle.getAttribute("aria-expanded")) !== "true") await toggle.click();
+  await expect(page.getByTestId("round-log").or(page.getByTestId("fairness")).first()).toBeVisible();
+}
