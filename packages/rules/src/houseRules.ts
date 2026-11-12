@@ -1,14 +1,20 @@
 import type { HouseRules } from "./types.js";
 
 /**
- * Defaults chosen so the game is provably fair.
+ * The default house rules.
  *
  * On a hit the thrower collects the current stake from each of the three other
  * seats; on a miss the thrower pays the current stake to the winning seat
- * only. Since a hit happens one time in four and a miss three times in four,
- * collecting 3x and paying 1x is exactly even at any stake level. Doubling
- * therefore changes the swing of the game without changing its fairness, and
- * the cap exists to protect chip balances rather than to balance the odds.
+ * only, so a throw is worth stake x (4 x P(hit) - 1) to the thrower:
+ * - From teeya or panja, exactly zero: each lands one time in four.
+ * - Chauka takes 5 of the 17 face counts, so chauka's thrower gains 1/128 of
+ *   the stake per throw and chakka's loses the same. Chyakhe bets involving
+ *   those two seats carry a correspondingly small edge.
+ * This asymmetry is part of the traditional game, not a bug, and is kept on
+ * purpose (CLAUDE.md, "The rules model"; proved in test/settlement.test.ts,
+ * "the game is exactly fair"). Doubling scales that edge with the stake but
+ * adds no new one, and the cap exists to protect chip balances rather than to
+ * balance the odds.
  *
  * This also reconciles the article's two descriptions of mar-taal: the payout
  * really is "multiplied by the number of wins", because the stake has doubled

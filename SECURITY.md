@@ -58,29 +58,39 @@ Who we expect:
 
 Several threats are answered by the order of a round, so here it is once:
 
-1. **Open.** The server generates `serverSeed = randomBytes(32)` and publishes
-   `commit = SHA-256(serverSeed)` to the table. It does not publish the seed.
+1. **Open.** As the round opens, and before betting does, the server draws a
+   32-byte seed from `crypto.randomBytes`
+   (`packages/server/src/fairness.ts:56`) and publishes only
+   `commitHash = sha256(seed)` (`packages/server/src/table.ts:737-744`). The
+   table's view carries the hash and never the pending seed
+   (`table.ts:415`).
 2. **Betting.** Seated players and chyakhe send bet requests. Each one is
-   validated (rule 3) and, if accepted, the chips at risk are moved into the
-   table's escrow account in the ledger before the bet counts.
+   validated (rule 3): against the bettor's balance, and against the
+   thrower's worst case on the bets so far (`table.ts:576-587`). Chips are
+   not moved into escrow; see "Betting more than you hold".
 3. **Lock.** The server closes betting. Any bet message that arrives after the
    lock is rejected, whatever its timestamp says.
-4. **Throw.** Faces are derived from `HMAC-SHA256(serverSeed, roundId ||
-   clientSeeds)`. The first 16 bits are the 16 shells, one bit each, so every
-   shell is exactly fair with no modulo bias.
-5. **Settle.** `@kauda/rules` settles the round. The ledger entries for the
-   round, the escrow release, the seed, the client seeds and the faces are
-   written in **one** database transaction.
-6. **Reveal.** Only after that commit does the server broadcast the faces and
-   `serverSeed`. Anyone can check that `SHA-256(serverSeed)` matches the
-   commit and recompute the faces.
+4. **Throw.** The 16 faces come from the seed alone: shell *i* is face up
+   when the low bit of byte *i* is 1, for the first 16 of the 32 bytes
+   (`facesFromSeed`, `packages/server/src/fairness.ts:40-48`; used at
+   `table.ts:752`). Each bit is a fair coin, so every shell is exactly fair
+   with no modulo bias. There are no client seeds: nothing a client sends
+   goes into the throw.
+5. **Settle.** `@kauda/rules` settles the round in memory (`table.ts:755`).
+   The round, with its seed, commit hash, faces and ledger entries, is then
+   written in **one** database transaction
+   (`packages/server/src/db/store.ts:137`).
+6. **Reveal.** The settled round, seed included, is broadcast as soon as the
+   table settles it (`packages/server/src/room.ts:462-480`). The write in
+   step 5 is queued at the same moment and the table advances no further
+   until it lands, but the reveal does not wait for it; if the write fails,
+   the table pauses and that round's chips are not kept. Anyone can check
+   that `sha256(seed)` matches the hash published in step 1 and recompute the
+   faces; the web client does this in the browser
+   (`packages/web/src/lib/fairness.ts`).
 
 The client animation is cosmetic. It is handed the server's faces and must
 come to rest on them. Physics in the client never decides a result.
-
-Note for phase 2: `throwShells` in `@kauda/rules` currently takes a
-`() => number` source. The server should derive faces from bits as described
-above, so that replay is exact and no float conversion is involved.
 
 ## Where chips come from: the mint
 
@@ -230,14 +240,16 @@ throws that favour one account, or picks a seed after seeing the bets.
 
 - Commit-reveal, as above. The seed is fixed before bets are taken and can be
   checked afterwards, so the server cannot choose it after seeing the bets.
-- Client seeds. Each human at the table sends a random contribution during
-  betting, and those go into the HMAC. Since the server committed first, it
-  cannot grind for a seed that gives a particular result. Bots contribute
-  nothing, because the operator controls them. **A table with no human client
-  seed is not provably fair**, and the client should say so.
-- Rule 8. The seed, client seeds and faces of every round are stored with the
-  round's ledger entries. A replay tool recomputes the faces and settlement
-  from those alone and flags any mismatch.
+- No client seeds, today. The throw depends on the server's seed alone, so
+  commit-reveal proves the seed was fixed before betting, but not that the
+  server did not choose it. An operator who controls the server could draw
+  seeds until one gave a result it wanted, before committing. Mixing in a
+  random contribution from each human during betting would close that gap;
+  it is not built.
+- Rule 8. The seed, commit hash and faces of every round are stored with the
+  round's ledger entries (`packages/server/src/db/schema.ts:74-75`).
+  `Table.replay` recomputes the faces and settlement from a record alone
+  (`packages/server/src/table.ts:796`).
 - Ledger invariants: the entries for every round sum to zero, the `round`
   entries across the whole ledger net to zero, and every account including
   the mint sums to zero. A periodic job checks all three across the whole
