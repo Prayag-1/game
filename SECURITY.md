@@ -362,9 +362,8 @@ everyone at the table and in the lobby.
   or flip the text around it.
 - Chat is plain text with a length cap. Links are not made clickable.
 - Content Security Policy: `default-src 'self'`, no `unsafe-inline` or
-  `unsafe-eval` for scripts, `connect-src` limited to our own API, websocket
-  and LiveKit hosts. `frame-ancestors 'none'`.
-- Display names coming from LiveKit are treated as user text like any other.
+  `unsafe-eval` for scripts, `connect-src` limited to our own API and
+  websocket. `frame-ancestors 'none'`.
 
 ### CSRF and cross-origin websockets
 
@@ -483,13 +482,13 @@ Known gaps, to close before this faces the internet:
 ### Denial of service
 
 *Attack.* Flood messages, open many sockets, create many rooms, send huge
-payloads, flood chat, or ask for LiveKit tokens over and over.
+payloads, or flood chat.
 
 *Defence.*
 
 - Size limits on every message and HTTP body, applied before parsing.
-- Per-session and per-IP rate limits on messages, chat, room creation, bets
-  and voice tokens. Clients that keep going over are disconnected.
+- Per-session and per-IP rate limits on messages, chat, room creation and
+  bets. Clients that keep going over are disconnected.
 - A cap on sockets per session and per IP, and on rooms per server.
 - Turn timers in every room: a player who stalls is replaced by a bot, so one
   idle or hostile player cannot freeze a table.
@@ -518,9 +517,8 @@ script.
 
 ### Secrets in the client
 
-Rule 7. The LiveKit API secret, database credentials and the cookie-signing
-key live only in the server's environment. The browser gets short-lived,
-room-scoped LiveKit tokens minted by the server. CI fails the build if a
+Rule 7. The Turnstile secret key, database credentials and the cookie-signing
+key live only in the server's environment. CI fails the build if a
 `VITE_*` variable name looks like a secret (`SECRET`, `KEY`, `TOKEN`,
 `PASSWORD`) or if the built bundle contains a known secret value.
 

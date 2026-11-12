@@ -16,7 +16,7 @@ Source for the rules: https://kbhom.wordpress.com/2013/10/19/rules-for-kauda-क
 | Language and repo | TypeScript everywhere; pnpm + Turborepo monorepo |
 | Client | React + Vite, Three.js via React Three Fiber, Rapier physics |
 | Game server | Node + Colyseus |
-| Voice | LiveKit |
+| Voice chat | Dropped. Do not add LiveKit or any WebRTC dependency. |
 | Data | Postgres + Drizzle for the ledger, Redis for presence |
 
 ## Security rules (short form)
@@ -102,7 +102,6 @@ A player who actually plays should confirm them.
 2. Table server plus bots
 3. Auth, lobby and tables
 4. 3D scene and the throw animation
-5. Voice
-6. Localisation and polish
-7. Security hardening
-8. Deploy and ops
+5. Localisation and polish
+6. Security hardening
+7. Deploy and ops
