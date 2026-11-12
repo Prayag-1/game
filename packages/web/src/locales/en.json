@@ -1,0 +1,124 @@
+{
+  "app": {
+    "title": "Kauda",
+    "tagline": "The sixteen-shell game of Tihar"
+  },
+  "header": {
+    "chips": "Chips",
+    "chipsTip": "Your chips (virtual, no cash value)",
+    "logout": "Log out",
+    "language": "नेपाली",
+    "languageLabel": "Change language: नेपाली"
+  },
+  "signIn": {
+    "title": "Start playing",
+    "intro": "Choose a name, pass the human check, and you're in.",
+    "nameLabel": "Your name",
+    "nameHint": "3 to 20 characters: Latin or Devanagari letters, digits, spaces, _ or -",
+    "submit": "Play",
+    "submitting": "One moment…",
+    "humanCheck": "Human check",
+    "humanCheckLoading": "Loading the human check…",
+    "humanCheckFailed": "The human check did not load. Check your connection and reload the page.",
+    "guestNote": "A guest account has no password. Clearing this browser's cookies loses it.",
+    "pendingCode": "After you sign in you'll go straight to table {{code}}."
+  },
+  "lobby": {
+    "title": "Lobby",
+    "quickPlay": "Quick Play",
+    "quickPlayHint": "Sit at a public table that has room",
+    "createPrivate": "Create Private Table",
+    "createPrivateHint": "Send friends a code or a link",
+    "presetLabel": "Rules",
+    "presetDefault": "Full rules",
+    "presetDefaultHint": "With doubling and ghanti",
+    "presetSimple": "Simple",
+    "presetSimpleHint": "No doubling, no ghanti",
+    "create": "Create",
+    "joinByCode": "Join by Code",
+    "codeLabel": "Table code",
+    "codePlaceholder": "e.g. K7RM2Q",
+    "join": "Join",
+    "publicTables": "Public tables",
+    "noTables": "No public tables right now. Quick Play opens a new one.",
+    "full": "Full",
+    "table": "Table {{id}}",
+    "humans": "people",
+    "bots": "bots",
+    "stake": "Stake",
+    "stakeTip": "Current stake, in chips",
+    "busy": "One moment…"
+  },
+  "phase": {
+    "waiting": "Waiting",
+    "betting": "Betting",
+    "throwing": "Throwing",
+    "revealing": "Result"
+  },
+  "preset": {
+    "default": "Full rules",
+    "simple": "Simple"
+  },
+  "table": {
+    "title": "Table",
+    "placeholderNote": "A temporary page: the table's server state, shown as raw JSON.",
+    "status": {
+      "idle": "Not connected",
+      "connecting": "Connecting…",
+      "connected": "Connected",
+      "reconnecting": "Reconnecting (attempt {{attempt}})…",
+      "replaced": "Another tab or window took over this player.",
+      "paused": "The table is paused."
+    },
+    "reconnect": "Reconnect",
+    "leave": "Leave table",
+    "rawState": "State from the server",
+    "waitingForState": "Waiting for the server's state…",
+    "seats": "Seats",
+    "emptySeat": "Empty",
+    "bot": "bot",
+    "you": "you",
+    "chyakheCount": "{{count}}",
+    "lastRound": "Last round",
+    "faceUp": "{{count}} shells face up",
+    "shareTitle": "Invite friends",
+    "shareHint": "Send them this link or code.",
+    "code": "Code",
+    "copy": "Copy link",
+    "copied": "Copied"
+  },
+  "terms": {
+    "teeya": { "label": "तीया", "tip": "Teeya: seat 3" },
+    "chauka": { "label": "चौका", "tip": "Chauka: seat 4" },
+    "panja": { "label": "पञ्जा", "tip": "Panja: seat 5" },
+    "chakka": { "label": "छक्का", "tip": "Chakka: seat 6" },
+    "thini": { "label": "ठिनी", "tip": "Thini: the base stake, in chips" },
+    "hate": { "label": "हाते", "tip": "Hate: the four players seated inside" },
+    "chyakhe": { "label": "च्याँखे", "tip": "Chyakhe: outside bettors" },
+    "maryo": { "label": "मा-र्यो", "tip": "Ma-ryo: a hit, the thrower wins" },
+    "tiryo": { "label": "ति-र्यो", "tip": "Ti-ryo: a miss, the thrower pays" }
+  },
+  "errors": {
+    "bad-name": "That name is not allowed: 3 to 20 letters (Latin or Devanagari), digits, spaces, _ or -.",
+    "turnstile-failed": "The human check failed. Try again.",
+    "too-many-guests": "Too many new guests from this address. Try again later.",
+    "malformed": "Something went wrong with the request.",
+    "not-found": "No table with that code.",
+    "too-many-guesses": "Too many code guesses. Wait a few minutes and try again.",
+    "too-many-tables": "Too many private tables created. Try again later.",
+    "table-full": "That table is full.",
+    "still-leaving-previous-table": "Still finishing your round at the other table. Try again in a moment.",
+    "table-paused": "That table is paused.",
+    "no-session": "Your session has ended. Sign in again.",
+    "not-at-a-table": "You are not at a table.",
+    "network": "Could not reach the server. Check your connection.",
+    "unknown": "Something went wrong ({{code}})."
+  },
+  "notices": {
+    "moved": "This player joined another table, in another tab or window.",
+    "sessionEnded": "This session was logged out.",
+    "seatGivenUp": "Your seat was given up while you were away.",
+    "loggedOut": "Logged out. A new guest is a new account, with fresh chips.",
+    "paused": "The table stopped: {{reason}}. Chips are as last saved."
+  }
+}

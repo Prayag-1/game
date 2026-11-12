@@ -24,6 +24,14 @@
  *   port, against DNS rebinding;
  * - the page has a strict Content-Security-Policy: scripts from this origin,
  *   the page's one inline script (by hash) and Cloudflare's Turnstile.
+ *
+ * With `web`, the built web client (packages/web/dist) is served at / under
+ * its own strict policy (webClient.ts), and the debug client moves to /debug.
+ *
+ * `proxyOrigins` are the origins of a dev front end that proxies to this
+ * server: the Vite dev server (packages/web/vite.config.ts). Through the
+ * proxy the browser's Origin header is the Vite page's, so the Origin checks
+ * above accept those as well. Nothing else is relaxed, and there is no CORS.
  */
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
@@ -44,6 +52,7 @@ import { TableDirectory } from "./lobby/directory.js";
 import { mountTableRoutes } from "./lobby/http.js";
 import { defineKaudaRoom, type KaudaRoomDeps } from "./room.js";
 import { defaultBotBuyIn } from "./table.js";
+import { webClient, wsOriginsOf } from "./webClient.js";
 
 /** The only address the dev server ever binds. */
 export const DEV_HOST = "127.0.0.1";
@@ -78,6 +87,10 @@ export interface DevServerOptions {
   };
   /** Overrides for the room, for tests. */
   readonly room?: Partial<KaudaRoomDeps>;
+  /** Serve the built web client from this directory at /; the debug client moves to /debug. */
+  readonly web?: { readonly distDir: string };
+  /** Origins of a dev front end that proxies to this server, such as http://127.0.0.1:5173. */
+  readonly proxyOrigins?: readonly string[];
 }
 
 export interface DevServer {
@@ -86,6 +99,8 @@ export interface DevServer {
   readonly directory: TableDirectory;
   readonly port: number;
   readonly url: string;
+  /** Where the debug client is: / without `web`, /debug with it. */
+  readonly debugUrl: string;
   close(): Promise<void>;
 }
 
@@ -118,7 +133,13 @@ export function contentSecurityPolicy(html: string, port: number): string {
 
 export async function startDevServer(options: DevServerOptions): Promise<DevServer> {
   let port = -1; // known once listening
-  const origins = (): readonly string[] => [`http://${DEV_HOST}:${port}`, `http://localhost:${port}`];
+  const ownOrigins = (): readonly string[] => [`http://${DEV_HOST}:${port}`, `http://localhost:${port}`];
+  const proxyOrigins = options.proxyOrigins ?? [];
+  for (const o of proxyOrigins) {
+    if (!/^http:\/\/(127\.0\.0\.1|localhost):\d{1,5}$/.test(o)) throw new Error(`proxy origin must be http://127.0.0.1 or localhost with a port: ${o}`);
+  }
+  const origins = (): readonly string[] => [...ownOrigins(), ...proxyOrigins];
+  const web = options.web === undefined ? null : webClient({ distDir: options.web.distDir, wsOrigins: () => wsOriginsOf(ownOrigins()) });
   const hosts = (): readonly string[] => [`${DEV_HOST}:${port}`, `localhost:${port}`];
 
   // Plain HTTP on 127.0.0.1, so the cookie cannot be Secure here. Production
@@ -147,7 +168,8 @@ export async function startDevServer(options: DevServerOptions): Promise<DevServ
         if (hosts().includes(req.headers.host ?? "")) return next();
         res.status(421).type("text/plain").send("wrong host");
       });
-      app.get("/", (_req, res) => {
+      if (web !== null) app.use((req, res, next) => web.handle(req, res, next));
+      app.get(web === null ? "/" : "/debug", (_req, res) => {
         // Read on every request, so editing the page needs no restart.
         const html = readFileSync(CLIENT_HTML, "utf8");
         res
@@ -225,6 +247,7 @@ export async function startDevServer(options: DevServerOptions): Promise<DevServ
     directory,
     port,
     url: `http://${DEV_HOST}:${port}/`,
+    debugUrl: `http://${DEV_HOST}:${port}/${web === null ? "" : "debug"}`,
     close: () => server.gracefullyShutdown(false),
   };
 }

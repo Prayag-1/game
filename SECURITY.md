@@ -361,9 +361,20 @@ everyone at the table and in the lobby.
   characters or zero-width characters, so a name cannot pose as someone else
   or flip the text around it.
 - Chat is plain text with a length cap. Links are not made clickable.
-- Content Security Policy: `default-src 'self'`, no `unsafe-inline` or
-  `unsafe-eval` for scripts, `connect-src` limited to our own API and
-  websocket. `frame-ancestors 'none'`.
+- Content Security Policy, served by the game server with the built web
+  client (`packages/server/src/webClient.ts`): `default-src 'none'`; scripts
+  only from our own origin and Cloudflare's Turnstile; styles, fonts and
+  images only from our own origin; `connect-src` limited to our own API and
+  websocket; no `unsafe-inline`, no `unsafe-eval`, no `data:` anywhere;
+  `frame-ancestors 'none'`. The Vite build emits no inline script or style
+  and inlines no assets, which is what makes this possible. Only the Vite dev
+  server relaxes the policy, for HMR. The Playwright test runs the production
+  build under the strict policy and fails on any violation.
+- `@kauda/web` cannot render HTML from strings: its ESLint config bans
+  `dangerouslySetInnerHTML`, `innerHTML`/`outerHTML`, `insertAdjacentHTML`
+  and `document.write`, and `pnpm build` runs the linter first. Server
+  responses are shape-checked and rendered as React text, error codes
+  included.
 
 ### CSRF and cross-origin websockets
 

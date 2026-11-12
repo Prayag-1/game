@@ -1,0 +1,42 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm test
+      # `build` lints @kauda/web (the dangerouslySetInnerHTML / innerHTML ban)
+      # and then scans its bundle for secrets.
+      - run: pnpm build
+      # SECURITY.md rule 7, against the real values: fails if the Turnstile
+      # secret, the session key or DATABASE_URL appears anywhere in the bundle.
+      # Secrets are not passed to builds of pull requests from forks; the scan
+      # still checks the test secret, the variable names and postgres:// URLs.
+      - name: Scan the web bundle for secrets
+        run: pnpm --filter @kauda/web check:bundle
+        env:
+          TURNSTILE_SECRET_KEY: ${{ secrets.TURNSTILE_SECRET_KEY }}
+          KAUDA_SESSION_SECRET: ${{ secrets.KAUDA_SESSION_SECRET }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      - run: pnpm --filter @kauda/web exec playwright install --with-deps chromium
+      - run: pnpm e2e
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: packages/web/test-results/

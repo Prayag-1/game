@@ -1,0 +1,125 @@
+{
+  "_TODO": "TODO: a native Nepali speaker must review every string in this file before launch. These were written by a non-native speaker. The game terms under \"terms\" come from the rules article and should be checked against how players at Tihar actually say them.",
+  "app": {
+    "title": "कौडा",
+    "tagline": "तिहारको सोह्र कौडे खेल"
+  },
+  "header": {
+    "chips": "चिप",
+    "chipsTip": "Your chips (virtual, no cash value)",
+    "logout": "बाहिर निस्कनुहोस्",
+    "language": "English",
+    "languageLabel": "भाषा बदल्नुहोस्: English"
+  },
+  "signIn": {
+    "title": "खेल्न सुरु गर्नुहोस्",
+    "intro": "नाम लेख्नुहोस्, मानव जाँच पार गर्नुहोस्, अनि खेल सुरु गर्नुहोस्।",
+    "nameLabel": "तपाईंको नाम",
+    "nameHint": "३ देखि २० अक्षर: नेपाली वा अंग्रेजी अक्षर, अङ्क, खाली ठाउँ, _ वा -",
+    "submit": "खेल्न जानुहोस्",
+    "submitting": "पर्खनुहोस्…",
+    "humanCheck": "मानव जाँच",
+    "humanCheckLoading": "मानव जाँच लोड हुँदैछ…",
+    "humanCheckFailed": "मानव जाँच लोड भएन। इन्टरनेट जाँच्नुहोस् र पेज फेरि खोल्नुहोस्।",
+    "guestNote": "पाहुना खातामा पासवर्ड हुँदैन। ब्राउजरको कुकी मेटाउनुभयो भने खाता हराउँछ।",
+    "pendingCode": "साइन इन गरेपछि तपाईं टेबल {{code}} मा जानुहुनेछ।"
+  },
+  "lobby": {
+    "title": "लबी",
+    "quickPlay": "छिटो खेल",
+    "quickPlayHint": "खाली ठाउँ भएको सार्वजनिक टेबलमा बस्नुहोस्",
+    "createPrivate": "निजी टेबल बनाउनुहोस्",
+    "createPrivateHint": "साथीहरूलाई कोड वा लिङ्क पठाउनुहोस्",
+    "presetLabel": "नियम",
+    "presetDefault": "पूरा नियम",
+    "presetDefaultHint": "दोब्बर र घण्टी सहित",
+    "presetSimple": "सरल",
+    "presetSimpleHint": "दोब्बर र घण्टी बिना",
+    "create": "बनाउनुहोस्",
+    "joinByCode": "कोडले जोडिनुहोस्",
+    "codeLabel": "टेबल कोड",
+    "codePlaceholder": "जस्तै K7RM2Q",
+    "join": "जोडिनुहोस्",
+    "publicTables": "सार्वजनिक टेबलहरू",
+    "noTables": "अहिले कुनै सार्वजनिक टेबल छैन। छिटो खेल थिच्नुहोस्, नयाँ टेबल खुल्छ।",
+    "full": "भरिएको",
+    "table": "टेबल {{id}}",
+    "humans": "मान्छे",
+    "bots": "बट",
+    "stake": "दाउ",
+    "stakeTip": "Current stake, in chips",
+    "busy": "पर्खनुहोस्…"
+  },
+  "phase": {
+    "waiting": "पर्खँदै",
+    "betting": "बाजी राख्दै",
+    "throwing": "कौडा फाल्दै",
+    "revealing": "नतिजा"
+  },
+  "preset": {
+    "default": "पूरा नियम",
+    "simple": "सरल"
+  },
+  "table": {
+    "title": "टेबल",
+    "placeholderNote": "यो अस्थायी पेज हो: टेबलको सर्भर अवस्था कच्चा JSON मा देखाइन्छ।",
+    "status": {
+      "idle": "जोडिएको छैन",
+      "connecting": "जोडिँदै…",
+      "connected": "जोडियो",
+      "reconnecting": "फेरि जोडिँदै (प्रयास {{attempt}})…",
+      "replaced": "अर्को ट्याब वा विन्डोले यो खेलाडी लियो।",
+      "paused": "टेबल रोकियो।"
+    },
+    "reconnect": "फेरि जोडिनुहोस्",
+    "leave": "टेबल छोड्नुहोस्",
+    "rawState": "सर्भरबाट आएको अवस्था",
+    "waitingForState": "सर्भरको अवस्था पर्खँदै…",
+    "seats": "हातेका सिट",
+    "emptySeat": "खाली",
+    "bot": "बट",
+    "you": "तपाईं",
+    "chyakheCount": "{{count}} जना",
+    "lastRound": "अघिल्लो पालो",
+    "faceUp": "{{count}} कौडा उत्तानो",
+    "shareTitle": "साथीहरूलाई बोलाउनुहोस्",
+    "shareHint": "यो लिङ्क वा कोड पठाउनुहोस्।",
+    "code": "कोड",
+    "copy": "लिङ्क कपी गर्नुहोस्",
+    "copied": "कपी भयो"
+  },
+  "terms": {
+    "teeya": { "label": "तीया", "tip": "Teeya: seat 3" },
+    "chauka": { "label": "चौका", "tip": "Chauka: seat 4" },
+    "panja": { "label": "पञ्जा", "tip": "Panja: seat 5" },
+    "chakka": { "label": "छक्का", "tip": "Chakka: seat 6" },
+    "thini": { "label": "ठिनी", "tip": "Thini: the base stake, in chips" },
+    "hate": { "label": "हाते", "tip": "Hate: the four players seated inside" },
+    "chyakhe": { "label": "च्याँखे", "tip": "Chyakhe: outside bettors" },
+    "maryo": { "label": "मा-र्यो", "tip": "Ma-ryo: a hit, the thrower wins" },
+    "tiryo": { "label": "ति-र्यो", "tip": "Ti-ryo: a miss, the thrower pays" }
+  },
+  "errors": {
+    "bad-name": "यो नाम मिलेन: ३ देखि २० अक्षर, नेपाली वा अंग्रेजी अक्षर, अङ्क, खाली ठाउँ, _ वा -।",
+    "turnstile-failed": "मानव जाँच असफल भयो। फेरि प्रयास गर्नुहोस्।",
+    "too-many-guests": "यो ठेगानाबाट धेरै नयाँ पाहुना बने। पछि प्रयास गर्नुहोस्।",
+    "malformed": "अनुरोधमा केही गल्ती भयो।",
+    "not-found": "त्यो कोडको टेबल छैन।",
+    "too-many-guesses": "धेरै पटक कोड प्रयास भयो। केही मिनेट पर्खनुहोस्।",
+    "too-many-tables": "धेरै निजी टेबल बने। पछि प्रयास गर्नुहोस्।",
+    "table-full": "त्यो टेबल भरिएको छ।",
+    "still-leaving-previous-table": "अर्को टेबलको पालो सकिँदैछ। एकछिनमा फेरि प्रयास गर्नुहोस्।",
+    "table-paused": "त्यो टेबल रोकिएको छ।",
+    "no-session": "तपाईंको सत्र सकियो। फेरि साइन इन गर्नुहोस्।",
+    "not-at-a-table": "तपाईं कुनै टेबलमा हुनुहुन्न।",
+    "network": "सर्भरसँग जोडिन सकिएन। इन्टरनेट जाँच्नुहोस्।",
+    "unknown": "केही गडबड भयो ({{code}})।"
+  },
+  "notices": {
+    "moved": "यो खेलाडी अर्को ट्याब वा विन्डोमा अर्को टेबलमा गयो।",
+    "sessionEnded": "यो सत्रबाट बाहिर निस्कियो।",
+    "seatGivenUp": "तपाईं टाढा हुँदा तपाईंको सिट छोडियो।",
+    "loggedOut": "बाहिर निस्कनुभयो। नयाँ पाहुना नयाँ खाता हो, नयाँ चिपसहित।",
+    "paused": "टेबल रोकियो: {{reason}}। चिप अन्तिम बचतमा जस्तै छन्।"
+  }
+}

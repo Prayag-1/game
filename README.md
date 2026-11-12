@@ -9,7 +9,7 @@ A browser game of Kauda, the Nepali sixteen-shell game played at Tihar.
 | `@kauda/rules` | The whole game as pure functions: the throw, the seat mapping and settlement. No I/O. The server treats it as the authority. |
 | `@kauda/protocol` | Wire messages shared by client and server. |
 | `@kauda/server` | The table as a pure state machine (phases, commit-reveal, the append-only ledger with its mint, command validation, bots, top-ups), wrapped by `KaudaRoom`, a Colyseus room that is only an adapter. It also serves the debug client (see below). |
-| `@kauda/web` | Browser client. Not yet built. |
+| `@kauda/web` | The browser client: React 19, Vite, Tailwind, Zustand, react-router, i18next (Nepali first), the Colyseus client. |
 
 ## Getting started
 
@@ -37,13 +37,57 @@ pnpm --filter @kauda/server db:generate  # after editing src/db/schema.ts; commi
 The rules the database enforces, and the single-writer rule, are in
 `SECURITY.md` under "The ledger in the database".
 
-## Debug client (developer only)
+## Web client
 
 ```bash
 pnpm dev
 ```
 
-Then open <http://127.0.0.1:3000/>. Set `PORT` to use another port.
+Then open <http://127.0.0.1:5173/>. That one command starts the game server
+on 127.0.0.1:3000 and the Vite dev server on 127.0.0.1:5173.
+
+Vite proxies `/session`, `/tables` and the `/ws` WebSocket to the game
+server, so the page, the API and the socket all share one origin. They
+have to, because the session cookie rides the WebSocket upgrade only on
+the page's own origin. There is no CORS. In production the game server
+serves the built `packages/web/dist` itself:
+
+```bash
+pnpm preview   # build the web client, serve it from the game server on http://127.0.0.1:3000/
+```
+
+`pnpm preview` serves it under the production Content-Security-Policy, with
+no `unsafe-inline` and no `unsafe-eval` (`packages/server/src/webClient.ts`).
+Only the Vite dev server relaxes the policy, because HMR needs inline scripts.
+
+Screens so far: sign-in (name plus Turnstile), the lobby (public tables,
+Quick Play, private tables, join by code, `/?code=XXXXXX` links), and a
+placeholder table that shows the room's raw state as JSON. Nepali is the
+default; the header toggles English, and the choice is kept in the browser.
+The Nepali strings still need a native speaker's review (see the TODO at the
+top of `packages/web/src/locales/ne.json`).
+
+The Turnstile **site** key is fixed at build time from
+`VITE_TURNSTILE_SITE_KEY`. Without it, the build uses Cloudflare's test key.
+The secret key never enters `@kauda/web`. `pnpm --filter @kauda/web build`
+lints first (it fails on `dangerouslySetInnerHTML` and `innerHTML`), then
+scans the bundle for secrets.
+
+Tests:
+
+```bash
+pnpm test                       # every package, including the web component tests
+pnpm --filter @kauda/web e2e    # Playwright, Chromium: real game server, production build, strict CSP
+```
+
+Run `pnpm --filter @kauda/web e2e:install` once first to fetch Chromium. The
+end-to-end run needs internet access to Cloudflare for the Turnstile widget.
+
+## Debug client (developer only)
+
+While `pnpm dev` runs, the debug client is at <http://127.0.0.1:3000/>
+(under `pnpm preview` it moves to <http://127.0.0.1:3000/debug>). Set `PORT`
+to put the game server on another port.
 
 `packages/server/debug-client/index.html` is a plain HTML page for clicking
 through a real game over real sockets: seats, bets, throws, top-ups, the

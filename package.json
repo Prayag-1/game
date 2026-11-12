@@ -4,14 +4,18 @@
   "packageManager": "pnpm@9.12.0",
   "scripts": {
     "build": "turbo run build",
-    "dev": "pnpm --filter @kauda/rules build && pnpm --filter @kauda/server dev",
+    "dev": "node scripts/dev.mjs",
     "test": "turbo run test",
     "lint": "turbo run lint",
-    "typecheck": "turbo run typecheck"
+    "typecheck": "turbo run typecheck",
+    "preview": "pnpm --filter @kauda/web build && node scripts/preview.mjs",
+    "e2e": "pnpm --filter @kauda/web e2e"
   },
   "devDependencies": {
     "turbo": "^2.3.0",
     "typescript": "^5.7.0"
   },
-  "engines": { "node": ">=22" }
+  "engines": {
+    "node": ">=22"
+  }
 }

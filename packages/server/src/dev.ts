@@ -11,7 +11,12 @@
  *   TURNSTILE_SITE_KEY, TURNSTILE_SECRET_KEY
  *                         otherwise Cloudflare's always-pass test keys
  *   KAUDA_GUESTS_PER_HOUR guest creations per IP per hour (default 5)
+ *   KAUDA_WEB_DIST        serve the built web client from this directory at /
+ *                         (under its strict CSP); the debug client moves to /debug
+ *   KAUDA_PROXY_ORIGINS   comma-separated origins of a dev front end that
+ *                         proxies here (the Vite dev server; scripts/dev.mjs sets it)
  */
+import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadSessionSecret } from "./auth/secret.js";
 import { cloudflareTurnstile, turnstileFromEnv } from "./auth/turnstile.js";
@@ -30,6 +35,12 @@ if (!Number.isSafeInteger(guestsPerHour) || guestsPerHour < 1) {
   process.exit(2);
 }
 
+const webDist = process.env.KAUDA_WEB_DIST ? resolve(process.env.KAUDA_WEB_DIST) : undefined;
+const proxyOrigins = (process.env.KAUDA_PROXY_ORIGINS ?? "")
+  .split(",")
+  .map((o) => o.trim())
+  .filter((o) => o.length > 0);
+
 // Both throw in production when their environment variables are missing.
 const { secret, source: secretSource } = loadSessionSecret(
   process.env,
@@ -44,6 +55,8 @@ try {
   dev = await startDevServer({
     port,
     store,
+    ...(webDist === undefined ? {} : { web: { distDir: webDist } }),
+    proxyOrigins,
     auth: {
       secret,
       turnstileSiteKey: turnstileKeys.siteKey,
@@ -70,7 +83,9 @@ process.once("SIGTERM", () => void stop());
 process.stdout.write(
   [
     "",
-    `  Kauda debug client: ${dev.url}`,
+    ...(webDist === undefined ? [] : [`  Kauda web client:   ${dev.url}  (built from ${webDist})`]),
+    `  Kauda debug client: ${dev.debugUrl}`,
+    ...(proxyOrigins.length === 0 ? [] : [`  Accepting proxy:    ${proxyOrigins.join(", ")}`]),
     `  Chips stored in:    ${store.description}`,
     `  Session key:        ${secretSource}`,
     `  Turnstile:          ${turnstileKeys.testKeys ? "Cloudflare's always-pass TEST keys" : "keys from the environment"}`,
