@@ -66,7 +66,7 @@ export function SeatCard(props: SeatCardProps) {
           <span className="sr-only">{t("play.seatNumber", { n: fmt.format(SEAT_NUMBER[seat]) })}</span>
         </span>
       </div>
-      <div className="truncate leading-tight text-ink" data-testid="occupant">
+      <div className="leading-tight [overflow-wrap:anywhere] text-ink" data-testid="occupant">
         {player === null ? <span className="text-ink-muted">{t("play.empty")}</span> : player.name}
       </div>
       {player !== null && (
@@ -103,7 +103,7 @@ export function SeatCard(props: SeatCardProps) {
             type="button"
             onClick={props.onSit}
             disabled={sitDisabled}
-            className="mt-1 rounded-control border border-brass/60 px-2 py-1 text-xs font-semibold text-brass transition-colors hover:border-brass-bright hover:text-brass-bright disabled:opacity-40"
+            className="mt-1 rounded-control border border-brass/60 px-2 py-1 text-xs font-semibold text-brass transition-colors hover:border-brass-bright hover:text-brass-bright disabled:cursor-not-allowed disabled:border-line-strong disabled:text-ink-muted"
           >
             {t("play.sit")}
           </button>

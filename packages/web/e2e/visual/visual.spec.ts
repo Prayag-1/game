@@ -7,6 +7,13 @@ const SIZES = {
   desktop: { width: 1440, height: 900 },
 } as const;
 
+/** The table's board is WebGL: wait until its first full frame is drawn. */
+async function boardReady(page: Page): Promise<void> {
+  const stage = page.getByTestId("stage");
+  await expect(stage).toHaveAttribute("data-renderer", "webgl");
+  await expect(stage).toHaveAttribute("data-ready", "true", { timeout: 20_000 });
+}
+
 async function open(page: Page, screen: string): Promise<void> {
   // A fixed clock, so countdowns and times read the same on every run.
   await page.clock.setFixedTime(new Date("2026-11-04T18:30:00+05:45"));
@@ -33,7 +40,9 @@ for (const [size, viewport] of Object.entries(SIZES)) {
 
     test("table", async ({ page }) => {
       await open(page, "table");
+      await boardReady(page);
       await expect(page.getByTestId("stage-result")).toBeVisible();
+      await expect(page.getByTestId("winning-seat")).toHaveAttribute("data-seat", "chakka");
       await expect(page.getByTestId("seat-teeya")).toHaveAttribute("data-me", "true");
       if (size === "desktop") {
         // The side panel is open on a wide screen, every check a green tick.
@@ -46,10 +55,29 @@ for (const [size, viewport] of Object.entries(SIZES)) {
     if (size === "phone") {
       test("table, sheet open", async ({ page }) => {
         await open(page, "table");
+        await boardReady(page);
         await page.getByTestId("sheet-toggle").click();
         await expect(page.getByTestId("log-row")).toHaveCount(7);
         await expect(page.locator('[data-testid="round-log"] [data-check="ok"]')).toHaveCount(7);
         await expect(page).toHaveScreenshot(`table-sheet-open-${size}.png`);
+      });
+
+      test("table without WebGL falls back to the 2D board", async ({ page }) => {
+        // As a browser with WebGL disabled or blocklisted: the API is there, a context is not.
+        await page.addInitScript(() => {
+          const real = HTMLCanvasElement.prototype.getContext;
+          HTMLCanvasElement.prototype.getContext = function (this: HTMLCanvasElement, kind: string, ...rest: unknown[]) {
+            return kind.startsWith("webgl") || kind === "experimental-webgl" ? null : real.call(this, kind, ...(rest as []));
+          } as typeof real;
+        });
+        const errors: string[] = [];
+        page.on("pageerror", (e) => errors.push(e.message));
+        await open(page, "table");
+        const stage = page.getByTestId("stage");
+        await expect(stage).toHaveAttribute("data-renderer", "2d");
+        await expect(stage.locator("[data-shell]")).toHaveCount(16);
+        await expect(page.getByTestId("winning-seat")).toBeVisible();
+        expect(errors).toEqual([]);
       });
     }
   });

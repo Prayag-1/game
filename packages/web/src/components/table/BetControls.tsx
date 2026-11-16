@@ -64,7 +64,7 @@ export function BetControls(props: BetControlsProps) {
             data-testid={`bet-${seat}`}
             disabled={!betEnabled(props, seat, amount, props.myChips)}
             onClick={() => props.onBet(seat, amount)}
-            className="rounded-control border border-brass/55 bg-brass/10 px-1 py-2 text-sm font-semibold text-brass transition-colors duration-200 hover:border-brass-bright hover:bg-brass/20 hover:text-brass-bright disabled:cursor-not-allowed disabled:border-line disabled:bg-transparent disabled:text-ink-muted disabled:opacity-60"
+            className="rounded-control border border-brass/55 bg-brass/10 px-1 py-2 text-sm font-semibold text-brass transition-colors duration-200 hover:border-brass-bright hover:bg-brass/20 hover:text-brass-bright disabled:cursor-not-allowed disabled:border-line disabled:bg-transparent disabled:text-ink-muted"
           >
             {t("play.betOn", { seat: t(`terms.${seat}.label`) })}
           </button>
@@ -77,7 +77,7 @@ export function BetControls(props: BetControlsProps) {
             type="button"
             onClick={props.onClear}
             disabled={!open}
-            className="rounded-control border border-line-strong px-2 py-0.5 text-xs text-ink-muted transition-colors hover:text-ink disabled:opacity-40"
+            className="rounded-control border border-line-strong px-2 py-0.5 text-xs text-ink-muted transition-colors hover:text-ink disabled:cursor-not-allowed disabled:border-dashed disabled:hover:text-ink-muted"
           >
             {t("play.clearBet")}
           </button>

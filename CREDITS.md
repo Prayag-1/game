@@ -18,6 +18,8 @@ Third-party assets committed to this repository, with their licences.
   mahogany toward a dark walnut (less red, lower saturation and brightness,
   slightly more contrast), and saved as WebP at quality 72 (36 KB). The
   texture still tiles.
+- **Used for:** the floor behind every screen, and the 3D board's surface
+  and rim at the table.
 
 ## Fonts
 
@@ -31,5 +33,8 @@ Third-party assets committed to this repository, with their licences.
 
 The cowrie shells, the mini table boards in the lobby and every other
 drawing in the app are drawn in SVG in this repository
-(`packages/web/src/components/Shell.tsx`). No artwork, layout or asset was
+(`packages/web/src/components/Shell.tsx`). The 3D board and its cowries are
+modelled in code, with no downloaded model
+(`packages/web/src/components/table/board3d/`); the shells' slit and teeth
+are textures drawn on a canvas at runtime. No artwork, layout or asset was
 taken from any other Kauda game.

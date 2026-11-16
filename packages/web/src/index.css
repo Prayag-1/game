@@ -12,8 +12,11 @@
  * here that drops below WCAG AA.
  *
  * The mood: a dark walnut board on the floor in low light, lit by a diyo.
+ *
+ * `static` emits every token as a CSS variable on :root, used or not: the 3D
+ * board (components/table/board3d) reads its colours from them at runtime.
  */
-@theme {
+@theme static {
   --font-sans: "Noto Sans Devanagari", ui-sans-serif, system-ui, sans-serif;
   --font-mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
 
@@ -149,6 +152,20 @@
       ellipse 55% 50% at 50% 48%,
       color-mix(in srgb, var(--color-glow) var(--board-glow), transparent) 0%,
       transparent 70%
+    );
+  }
+
+  /*
+   * The vignette at the table: a CSS overlay over the whole view, the 3D
+   * board included, cheaper on a phone than a post-processing pass. It covers
+   * the viewport so it has no edge of its own; the UI sits above it.
+   */
+  .board-vignette {
+    background: radial-gradient(
+      ellipse 80% 75% at 50% 48%,
+      transparent 45%,
+      color-mix(in srgb, var(--color-bg) 45%, transparent) 75%,
+      color-mix(in srgb, var(--color-bg) 85%, transparent) 100%
     );
   }
 

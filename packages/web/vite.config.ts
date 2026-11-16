@@ -1,12 +1,56 @@
 /// <reference types="vitest/config" />
 import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
-import { defineConfig, loadEnv } from "vite";
+import { gzipSync } from "node:zlib";
+import { defineConfig, loadEnv, type Plugin, type Rollup } from "vite";
 
 /** Cloudflare's documented always-pass test site key. Public, and useless in production. */
 const TURNSTILE_TEST_SITE_KEY = "1x00000000000000000000AA";
 const GAME_SERVER = process.env.KAUDA_GAME_SERVER ?? "http://127.0.0.1:3000";
 const DEV_PORT = 5173;
+
+/** three.js and React Three Fiber/drei: the 3D board's code. */
+const THREE_MODULE = /[\\/]node_modules[\\/](?:three|@react-three)[\\/]/;
+
+/**
+ * Sign-in and the lobby must never download three.js: it belongs only in the
+ * lazily loaded 3D board chunk (components/table/BoardStage.tsx). This fails
+ * the build if any three.js module lands in an entry chunk or in anything an
+ * entry imports statically (what the browser fetches before the first
+ * screen), and fails if the 3D chunk has vanished. It prints the 3D chunk's
+ * size on every build.
+ */
+export function keepThreeOutOfEntry(): Plugin {
+  return {
+    name: "kauda:keep-three-out-of-entry",
+    apply: "build",
+    generateBundle(_options, bundle) {
+      const chunks = Object.values(bundle).filter((c): c is Rollup.OutputChunk => c.type === "chunk");
+      const byFile = new Map(chunks.map((c) => [c.fileName, c]));
+      const eager = new Set<string>();
+      const stack = chunks.filter((c) => c.isEntry).map((c) => c.fileName);
+      for (let file = stack.pop(); file !== undefined; file = stack.pop()) {
+        if (eager.has(file)) continue;
+        eager.add(file);
+        stack.push(...(byFile.get(file)?.imports ?? []));
+      }
+      const offenders = [...eager].flatMap((file) =>
+        Object.keys(byFile.get(file)?.modules ?? {})
+          .filter((id) => THREE_MODULE.test(id))
+          .map((id) => `${file} <- ${id.replace(/^.*node_modules[\\/]/, "")}`),
+      );
+      if (offenders.length > 0) {
+        this.error(`three.js reached the entry chunk, so sign-in and the lobby would download it:\n  ${offenders.slice(0, 10).join("\n  ")}`);
+      }
+      const board = chunks.filter((c) => !eager.has(c.fileName) && Object.keys(c.modules).some((id) => THREE_MODULE.test(id)));
+      if (board.length === 0) this.error("no lazily loaded chunk holds three.js: the 3D board chunk is missing");
+      for (const c of board) {
+        const kb = (n: number) => `${(n / 1024).toFixed(1)} KB`;
+        console.log(`  3D board chunk ${c.fileName}: ${kb(Buffer.byteLength(c.code))}, ${kb(gzipSync(c.code).length)} gzipped`);
+      }
+    },
+  };
+}
 
 export default defineConfig(({ mode, command }) => {
   const env = loadEnv(mode, process.cwd(), "VITE_");
@@ -30,7 +74,7 @@ export default defineConfig(({ mode, command }) => {
   }
 
   return {
-    plugins: [react(), tailwindcss()],
+    plugins: [react(), tailwindcss(), keepThreeOutOfEntry()],
     define: { "import.meta.env.VITE_TURNSTILE_SITE_KEY": JSON.stringify(siteKey) },
     // An inline PostCSS config stops Vite searching parent directories for
     // one (see packages/server/vitest.config.ts). Tailwind runs as a Vite
@@ -41,6 +85,9 @@ export default defineConfig(({ mode, command }) => {
       // font-src 'self' and img-src 'self' (no data:).
       assetsInlineLimit: 0,
       sourcemap: false,
+      // The one big chunk is the 3D board (three.js and React Three Fiber),
+      // fetched only at a table; keepThreeOutOfEntry prints its size.
+      chunkSizeWarningLimit: 1000,
     },
     server: {
       host: "127.0.0.1",

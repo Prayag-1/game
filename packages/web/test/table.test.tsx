@@ -9,7 +9,6 @@ import { Stage } from "../src/components/table/Stage";
 import { checkRound } from "../src/lib/fairness";
 import type { RoundRecord } from "../src/lib/protocol";
 import { ingest, useTable } from "../src/lib/tableStore";
-import { seatSlots } from "../src/screens/Table";
 
 // ---------------------------------------------------------------- seat card
 
@@ -280,23 +279,28 @@ describe("fairness check", () => {
 // ----------------------------------------------------------- stage and seats
 
 describe("stage", () => {
+  const RESULT = { roundId: "t:1", faces: FACES, faceUp: 8, winningSeat: "chauka", hit: false } as const;
+
   it("draws sixteen shells, slit side showing when up, with the count and the winner in Nepali", () => {
-    render(<Stage result={{ faces: FACES, faceUp: 8, winningSeat: "chauka", hit: false }} pending={false} />);
+    render(<Stage result={RESULT} pending={false} />);
     const shells = screen.getByTestId("stage").querySelectorAll("[data-shell]");
     expect(shells).toHaveLength(16);
     expect(screen.getByTestId("stage").querySelectorAll('[data-shell="up"]')).toHaveLength(8);
     const result = screen.getByTestId("stage-result");
     expect(result).toHaveTextContent("८ उत्तानो");
     expect(within(result).getByRole("button", { name: "चौका" })).toHaveAttribute("title", "Chauka: seat 4");
-    expect(result).toHaveTextContent("जित्यो!");
     expect(within(result).getByRole("button", { name: "ति-र्यो" })).toBeInTheDocument();
     // Face up shows the slit; face down the smooth back.
     expect(screen.getByTestId("stage").querySelectorAll('[data-shell="up"] .shell-slit')).toHaveLength(8);
     expect(screen.getByTestId("stage").querySelectorAll('[data-shell="down"] .shell-slit')).toHaveLength(0);
   });
 
-  it("shows the result word large, in sindoor for a hit", () => {
-    render(<Stage result={{ faces: FACES, faceUp: 8, winningSeat: "chauka", hit: true }} pending={false} />);
+  it("shows the winning seat large in brass with the count beside it, and a hit in sindoor", () => {
+    render(<Stage result={{ ...RESULT, hit: true }} pending={false} />);
+    const seat = screen.getByTestId("winning-seat");
+    expect(seat).toHaveTextContent("चौका");
+    expect(seat).toHaveClass("text-brass", "text-3xl", "lg:text-5xl");
+    expect(seat.parentElement).toHaveTextContent("८ उत्तानो");
     const word = screen.getByTestId("stage-result").querySelector("[data-result]");
     expect(word).toHaveAttribute("data-result", "hit");
     expect(word).toHaveTextContent("मा-र्यो");
@@ -304,15 +308,8 @@ describe("stage", () => {
   });
 
   it("shows the shells gathered, face down, while a round waits for its throw", () => {
-    render(<Stage result={{ faces: FACES, faceUp: 8, winningSeat: "chauka", hit: true }} pending />);
+    render(<Stage result={{ ...RESULT, hit: true }} pending />);
     expect(screen.getByTestId("stage").querySelectorAll('[data-shell="pending"]')).toHaveLength(16);
     expect(screen.queryByTestId("stage-result")).toBeNull();
-  });
-});
-
-describe("seat layout", () => {
-  it("places the seats anticlockwise in turn order, with mine at the bottom", () => {
-    expect(seatSlots("teeya")).toEqual({ teeya: "bottom", chauka: "right", panja: "top", chakka: "left" });
-    expect(seatSlots("panja")).toEqual({ panja: "bottom", chakka: "right", teeya: "top", chauka: "left" });
   });
 });

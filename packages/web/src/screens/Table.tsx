@@ -10,10 +10,12 @@ import { Fairness } from "../components/table/Fairness";
 import { PhaseBar } from "../components/table/PhaseBar";
 import { RoundLog } from "../components/table/RoundLog";
 import { SeatCard } from "../components/table/SeatCard";
-import { Stage, type StageResult } from "../components/table/Stage";
+import { BoardStage } from "../components/table/BoardStage";
+import type { StageResult } from "../components/table/Stage";
 import { TopUp } from "../components/table/TopUp";
 import { Term } from "../components/Term";
 import { buttonPrimary, buttonQuiet, eyebrow, input } from "../components/ui";
+import { seatSides, type Side } from "../lib/board";
 import type { TableView } from "../lib/protocol";
 import { useSession } from "../lib/session";
 import { claimTopUp, leaveTable, resume, send } from "../lib/table";
@@ -25,34 +27,30 @@ import { clearRefusal, myBetIn, myPlayerIn, myReservationIn, mySeatIn, useTable 
  * actions, the round log, fairness, the chyakhe) sits in one sheet: a
  * collapsible bottom sheet on a phone, a side panel on a wide screen.
  *
- * The centre is <Stage>, which only gets props, so the 3D scene can replace
- * it without touching the rest.
+ * The centre is <BoardStage>: the 3D board, or the 2D stage where WebGL is
+ * missing. It only gets props. It spans the top two rows, edge to edge, and
+ * the seats across from me and to either side are DOM panels laid over the
+ * board's rim; mine and the result sit below it.
  */
 
-/** Screen slots, going anticlockwise from the bottom: bottom, right, top, left. */
-type Slot = "bottom" | "right" | "top" | "left";
-const SLOTS: readonly Slot[] = ["bottom", "right", "top", "left"];
-const SLOT_CLASS: Record<Slot, string> = {
-  bottom: "col-start-2 row-start-3 w-full max-w-44 justify-self-center lg:max-w-52",
-  right: "col-start-3 row-start-2 self-center",
-  top: "col-start-2 row-start-1 w-full max-w-44 justify-self-center lg:max-w-52",
-  left: "col-start-1 row-start-2 self-center",
+/**
+ * Where each seat's panel goes, by its side of the board (lib/board.ts
+ * seatSides). On a phone the left and right panels sit at the board's near
+ * corners, beside the result, where the round board leaves floor free: level
+ * with its middle they would cover the widest part of the scatter. On a wide
+ * screen there is room for them level with the middle.
+ */
+const SIDE_CLASS: Record<Side, string> = {
+  bottom: "relative z-20 col-start-2 row-start-3 w-full max-w-44 justify-self-center lg:max-w-52",
+  right: "relative z-20 col-start-3 row-span-2 row-start-1 self-end lg:self-center",
+  top: "relative z-20 col-start-2 row-start-1 w-full max-w-44 justify-self-center lg:max-w-52",
+  left: "relative z-20 col-start-1 row-span-2 row-start-1 self-end lg:self-center",
 };
-
-/** The seats in their real anticlockwise order, turned so that `anchor` sits at the bottom. */
-export function seatSlots(anchor: SeatId): Record<SeatId, Slot> {
-  const start = TURN_ORDER.indexOf(anchor);
-  const out = {} as Record<SeatId, Slot>;
-  TURN_ORDER.forEach((seat, i) => {
-    out[seat] = SLOTS[(i - start + TURN_ORDER.length) % TURN_ORDER.length] as Slot;
-  });
-  return out;
-}
 
 function stageResult(view: TableView): { result: StageResult | null; pending: boolean } {
   const r = view.lastRound;
   return {
-    result: r === null ? null : { faces: r.faces, faceUp: r.faceUp, winningSeat: r.winningSeat, hit: r.hit },
+    result: r === null ? null : { roundId: r.roundId, faces: r.faces, faceUp: r.faceUp, winningSeat: r.winningSeat, hit: r.hit },
     pending: view.phase === "betting" || view.phase === "throwing",
   };
 }
@@ -109,7 +107,8 @@ export function TableScreen() {
   const myReservation = myReservationIn(view, myId);
   const myBet = myBetIn(view, myId);
   const minToSit = s.welcome?.minChipsToSit ?? 0;
-  const slots = seatSlots(mySeat ?? "teeya");
+  const sides = seatSides(mySeat);
+  const thrower = view.phase === "waiting" ? null : view.thrower;
   const multiplier = Math.max(1, Math.round(view.stake / view.rules.thini));
   const myThrow = mySeat !== null && view.phase === "throwing" && view.thrower === mySeat;
   const latest = s.rounds[0] ?? null;
@@ -172,8 +171,10 @@ export function TableScreen() {
     <main className={`relative mx-auto flex ${FILL_VIEWPORT} w-full max-w-7xl flex-col lg:flex-row lg:gap-6 lg:px-6 lg:py-4`}>
       {/* The board. */}
       <div className="flex min-h-0 flex-1 flex-col gap-2 px-3 pt-2 pb-2 lg:p-0">
-        {banner}
-        <PhaseBar phase={view.phase} phaseEndsAt={view.phaseEndsAt} stake={view.stake} multiplier={multiplier} />
+        <div className="relative z-20 flex flex-col gap-2">
+          {banner}
+          <PhaseBar phase={view.phase} phaseEndsAt={view.phaseEndsAt} stake={view.stake} multiplier={multiplier} />
+        </div>
         <section
           className="mx-auto grid min-h-0 w-full max-w-4xl flex-1 grid-cols-[5.5rem_minmax(0,1fr)_5.5rem] grid-rows-[auto_minmax(0,1fr)_auto] gap-x-2 gap-y-3 pt-2 sm:grid-cols-[7.5rem_minmax(0,1fr)_7.5rem] lg:grid-cols-[10rem_minmax(0,1fr)_10rem]"
           aria-label={t("table.seats")}
@@ -183,12 +184,12 @@ export function TableScreen() {
             const reservedBy = view.reservations.find((r) => r.seat === seat)?.playerId;
             const humanHere = player !== null && !player.isBot;
             return (
-              <div key={seat} className={`min-w-0 ${SLOT_CLASS[slots[seat]]}`}>
+              <div key={seat} className={`min-w-0 ${SIDE_CLASS[sides[seat]]}`}>
                 <SeatCard
                   seat={seat}
                   player={player}
                   isMe={player !== null && player.playerId === myId}
-                  isThrower={view.thrower === seat && view.phase !== "waiting"}
+                  isThrower={thrower === seat}
                   reservation={reservedBy === undefined ? null : { name: s.names[reservedBy] ?? "?", mine: reservedBy === myId }}
                   betsTotal={view.bets.filter((b) => b.seat === seat).reduce((sum, b) => sum + b.chips, 0)}
                   canSit={mySeat === null && !humanHere && (reservedBy === undefined || reservedBy === myId)}
@@ -199,8 +200,9 @@ export function TableScreen() {
               </div>
             );
           })}
-          <div className="col-start-2 row-start-2 min-h-0">
-            <Stage {...stageResult(view)} />
+          {/* On a phone the board bleeds to the screen's edges, past the column's padding. */}
+          <div className="col-span-3 col-start-1 row-span-2 row-start-1 -mx-3 min-h-0 lg:mx-0">
+            <BoardStage {...stageResult(view)} mySeat={mySeat} thrower={thrower} />
           </div>
         </section>
       </div>
@@ -259,10 +261,10 @@ function Sheet({ summary, actions, children }: { readonly summary: ReactNode; re
   }, [open]);
   return (
     <>
-      {open && <div aria-hidden="true" onClick={() => setOpen(false)} className="animate-rise absolute inset-0 z-20 bg-bg/55 lg:hidden" />}
+      {open && <div aria-hidden="true" onClick={() => setOpen(false)} className="animate-rise absolute inset-0 z-[25] bg-bg/55 lg:hidden" />}
       <aside
-        className={`flex shrink-0 flex-col rounded-t-[1.25rem] border-t border-line-strong bg-panel-strong shadow-panel backdrop-blur-md lg:static lg:max-h-none lg:w-[22rem] lg:rounded-panel lg:border lg:border-line lg:bg-panel xl:w-[24rem] ${
-          open ? "absolute inset-x-0 bottom-0 z-30 max-h-[82%]" : ""
+        className={`z-30 flex shrink-0 flex-col rounded-t-[1.25rem] border-t border-line-strong bg-panel-strong shadow-panel backdrop-blur-md lg:max-h-none lg:w-[22rem] lg:rounded-panel lg:border lg:border-line lg:bg-panel xl:w-[24rem] ${
+          open ? "absolute inset-x-0 bottom-0 max-h-[82%] lg:relative" : "relative"
         }`}
         data-testid="sheet"
         data-open={open ? "true" : "false"}

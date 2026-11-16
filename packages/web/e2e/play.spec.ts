@@ -13,6 +13,10 @@ test.beforeEach(async ({ context }) => {
 
 test("signs in under the strict CSP with an httpOnly cookie, reaches a table, logs out to a fresh account", async ({ page, context }) => {
   const errors = collectErrors(page);
+  const scripts: string[] = [];
+  page.on("request", (r) => {
+    if (r.resourceType() === "script") scripts.push(r.url());
+  });
   const response = await page.goto("/");
   const csp = response?.headers()["content-security-policy"] ?? "";
   expect(csp).toContain("default-src 'none'");
@@ -28,12 +32,19 @@ test("signs in under the strict CSP with an httpOnly cookie, reaches a table, lo
   expect(cookie?.sameSite).toBe("Lax");
   expect(await page.evaluate(() => document.cookie)).toBe("");
   const startingChips = (await page.getByTestId("my-chips").textContent()) ?? "";
+  // Sign-in and the lobby never download three.js: it is only in the table's 3D chunk.
+  expect(scripts.filter((url) => url.includes("Stage3D"))).toEqual([]);
 
   await quickPlay(page);
   // Four seats with their Nepali names, in a round that is going on.
   for (const seat of ["teeya", "chauka", "panja", "chakka"]) await expect(page.getByTestId(`seat-${seat}`)).toBeVisible();
   await expect(page.getByTestId("seat-teeya")).toContainText("तीया");
-  await expect(page.getByTestId("stage").locator("[data-shell]")).toHaveCount(16);
+  // The 3D board draws under the strict CSP (expectCleanPage below fails on any violation).
+  const stage = page.getByTestId("stage");
+  await expect(stage).toHaveAttribute("data-renderer", "webgl");
+  await expect(stage).toHaveAttribute("data-ready", "true", { timeout: 20_000 });
+  await expect(stage).toHaveAttribute("data-shells", "16");
+  expect(scripts.filter((url) => url.includes("Stage3D"))).toHaveLength(1);
   await expect(page.getByTestId("chyakhe-list")).toContainText("E2E खेलाडी");
 
   // Rounds settle into the log, and the browser checks every seed.

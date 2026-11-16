@@ -36,7 +36,7 @@ function parseColour(raw: string): Colour {
 }
 
 const tokens: Record<string, Colour> = {};
-const theme = /@theme\s*\{([\s\S]*?)\n\}/.exec(css)?.[1] ?? "";
+const theme = /@theme(?:\s+static)?\s*\{([\s\S]*?)\n\}/.exec(css)?.[1] ?? "";
 for (const m of theme.matchAll(/--color-([a-z-]+):\s*([^;]+);/g)) {
   const [, name, value] = m;
   if (name === undefined || value === undefined || name === "*" || /^(transparent|currentColor|initial)$/.test(value.trim())) continue;
@@ -89,6 +89,8 @@ const SURFACES: Record<string, RGB> = {
   "sindoor hover": token("sindoor-bright").rgb,
   "sindoor wash in the sheet": over(token("sindoor").rgb, 0.15, layer("panel-strong", lit)),
   brass: token("brass").rgb,
+  "disabled primary on a panel": over(token("sindoor").rgb, 0.25, layer("panel", lit)),
+  "disabled primary in the sheet": over(token("sindoor").rgb, 0.25, layer("panel-strong", lit)),
 };
 
 const TEXT_AA = 4.5;
@@ -123,6 +125,9 @@ PAIRS.push(
   ["sindoor-ink", "sindoor wash in the sheet", TEXT_AA],
   ["ink", "sindoor", TEXT_AA],
   ["ink", "sindoor hover", TEXT_AA],
+  // Disabled buttons keep readable text: muted, on a faint sindoor wash or a panel.
+  ["ink-muted", "disabled primary on a panel", TEXT_AA],
+  ["ink-muted", "disabled primary in the sheet", TEXT_AA],
   // The thrower's mark: dark text on brass.
   ["bg", "brass", TEXT_AA],
 );
@@ -185,6 +190,15 @@ describe("components", () => {
           if (PALETTE.test(line) || LITERAL.test(line)) offences.push(`${file.slice(root.length)}:${i + 1}: ${line.trim()}`);
         });
     }
+    expect(offences).toEqual([]);
+  });
+
+  it("never fade a disabled control with opacity, which made its label unreadable", () => {
+    const offences = files.flatMap((file) =>
+      readFileSync(file, "utf8")
+        .split("\n")
+        .flatMap((line, i) => (/disabled:opacity-/.test(line) ? [`${file.slice(root.length)}:${i + 1}`] : [])),
+    );
     expect(offences).toEqual([]);
   });
 });

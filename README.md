@@ -99,10 +99,19 @@ after 2 minutes, private ones after 10 minutes, and the code dies with the
 table.
 
 The table screen has two layers: the board, with the seats at its edges, and
-the `Stage` in the middle (`packages/web/src/components/table/Stage.tsx`),
-which gets only props and draws the sixteen cowries in 2D until the 3D scene
-replaces it. Your actions, the round log and fairness sit in a bottom sheet
-on a phone and a side panel on a wide screen.
+your actions, the round log and fairness, in a bottom sheet on a phone and a
+side panel on a wide screen.
+
+The board is a still 3D scene (three.js through React Three Fiber; no throw
+animation or physics yet): `BoardStage`
+(`packages/web/src/components/table/BoardStage.tsx`) lazy-loads
+`board3d/Stage3D.tsx` as its own chunk, so sign-in and the lobby never
+download three.js; the build fails if it reaches the entry chunk, and prints
+the 3D chunk's size. Where WebGL is missing, or the scene throws or loses
+its context, the 2D `Stage` takes over behind the same props. Seat names,
+chips and the result are DOM over the canvas, never WebGL text. Where the
+shells lie and which way the board turns for your seat are pure functions in
+`packages/web/src/lib/board.ts`, tested in `test/board.test.ts`.
 
 The look (a dark walnut board in low light) lives in design tokens in
 `packages/web/src/index.css`, and nowhere else: Tailwind's own palette is

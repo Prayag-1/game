@@ -2,17 +2,19 @@ import { numberFormat } from "../../lib/format";
 import type { SeatId } from "@kauda/rules";
 import { useTranslation } from "react-i18next";
 import { Shell } from "../Shell";
-import { Term } from "../Term";
+import { StageResultText } from "./StageResult";
 
 /**
- * The centre of the table: the sixteen cowries on the wood, and the result
- * word beneath them. 2D for now; the 3D board replaces this component later.
+ * The centre of the table in 2D: the sixteen cowries drawn in SVG, and the
+ * result beneath them. The 3D board (BoardStage, board3d/Stage3D) takes the
+ * same props and falls back to this one when WebGL is missing or fails.
  *
- * It knows nothing about the room or the store: it renders only its props,
- * so the 3D canvas can take its place behind the same interface.
+ * It knows nothing about the room or the store: it renders only its props.
  */
 
 export interface StageResult {
+  /** The settled round's id: it fixes where the shells lie on the 3D board. */
+  readonly roundId: string;
   readonly faces: readonly boolean[];
   readonly faceUp: number;
   readonly winningSeat: SeatId;
@@ -24,6 +26,10 @@ export interface StageProps {
   readonly result: StageResult | null;
   /** A new round is waiting for its throw: the shells are not down yet. */
   readonly pending: boolean;
+  /** My seat, drawn nearest me; null for a chyakhe. The 2D stage ignores it. */
+  readonly mySeat?: SeatId | null;
+  /** Whose side of the board glows. The 2D stage ignores it (the seat panel glows). */
+  readonly thrower?: SeatId | null;
 }
 
 const SHELLS = 16;
@@ -57,7 +63,7 @@ export function Stage({ result, pending }: StageProps) {
   // A new throw re-mounts the shells, so they settle in afresh.
   const throwKey = show === null ? "heap" : show.faces.map((f) => (f ? 1 : 0)).join("");
   return (
-    <div className="relative flex h-full min-h-0 flex-col items-center justify-center gap-1" data-testid="stage">
+    <div className="relative flex h-full min-h-0 flex-col items-center justify-center gap-1" data-testid="stage" data-renderer="2d">
       <div className="diyo-glow animate-flicker pointer-events-none absolute -inset-x-16 -inset-y-6" aria-hidden="true" />
       <svg
         viewBox="22 9 58 57"
@@ -83,18 +89,7 @@ export function Stage({ result, pending }: StageProps) {
           })}
         </g>
       </svg>
-      {show === null ? (
-        <p className="relative pb-1 text-center text-sm text-ink">{t("play.stageWaiting")}</p>
-      ) : (
-        <div key={throwKey} className="animate-rise relative flex flex-col items-center pb-1 text-center leading-tight" data-testid="stage-result" aria-live="polite">
-          <p className={`text-4xl font-semibold lg:text-5xl ${show.hit ? "text-sindoor-ink" : "text-ink"}`} data-result={show.hit ? "hit" : "miss"}>
-            <Term id={show.hit ? "maryo" : "tiryo"} quiet />
-          </p>
-          <p className="mt-1 text-sm text-ink lg:text-base">
-            <Term id={show.winningSeat} /> {t("play.wins")} <span aria-hidden="true">·</span> <span className="tabular-nums">{t("play.stageFaceUp", { n })}</span>
-          </p>
-        </div>
-      )}
+      <StageResultText show={show} />
     </div>
   );
 }

@@ -1,6 +1,7 @@
 import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
+import { keepThreeOutOfEntry } from "./vite.config";
 
 /**
  * Builds the visual-baseline fixture (e2e/visual), never the app. Same root,
@@ -10,12 +11,13 @@ import { defineConfig } from "vite";
  * /e2e/visual/ under `vite preview`, for playwright.visual.config.ts.
  */
 export default defineConfig({
-  plugins: [react(), tailwindcss()],
+  plugins: [react(), tailwindcss(), keepThreeOutOfEntry()],
   css: { postcss: {} },
   build: {
     outDir: "e2e/visual/dist",
     emptyOutDir: true,
     assetsInlineLimit: 0,
+    chunkSizeWarningLimit: 1000,
     sourcemap: false,
     rollupOptions: { input: "e2e/visual/index.html" },
   },
