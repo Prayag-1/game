@@ -10,6 +10,11 @@
     "sourceMap": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
+    // Load no @types package unless a package's tsconfig names it. Without
+    // this, tsc loads every @types folder in every parent directory, so a
+    // stray node_modules above the repo can hide a missing dependency
+    // locally that CI then fails on.
+    "types": [],
     "forceConsistentCasingInFileNames": true
   }
 }
