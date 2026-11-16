@@ -69,6 +69,8 @@
   --animate-rise: rise 260ms ease-out both;
   --animate-settle: settle 340ms ease-out both;
   --animate-flicker: flicker 5s ease-in-out infinite alternate;
+  /* The diyo over the 3D board: quicker and less even than flicker, as a flame is. */
+  --animate-flame: flame 3.1s ease-in-out infinite alternate;
 
   @keyframes rise {
     from {
@@ -102,6 +104,32 @@
     }
     100% {
       opacity: 0.97;
+    }
+  }
+  @keyframes flame {
+    0% {
+      opacity: 0.7;
+    }
+    13% {
+      opacity: 0.95;
+    }
+    27% {
+      opacity: 0.78;
+    }
+    41% {
+      opacity: 1;
+    }
+    55% {
+      opacity: 0.83;
+    }
+    68% {
+      opacity: 0.92;
+    }
+    82% {
+      opacity: 0.74;
+    }
+    100% {
+      opacity: 0.9;
     }
   }
 }
@@ -153,6 +181,21 @@
       color-mix(in srgb, var(--color-glow) var(--board-glow), transparent) 0%,
       transparent 70%
     );
+  }
+
+  /*
+   * The diyo's light breathing over the 3D board: a warm wash above the
+   * canvas, strongest where the lamp's pool falls (left of centre), whose
+   * opacity the flame animation moves. Opacity only, so the compositor runs
+   * it and the canvas never redraws for it.
+   */
+  .lamp-flicker {
+    background: radial-gradient(
+      ellipse 58% 52% at 40% 50%,
+      color-mix(in srgb, var(--color-glow) 11%, transparent) 0%,
+      transparent 72%
+    );
+    will-change: opacity;
   }
 
   /*

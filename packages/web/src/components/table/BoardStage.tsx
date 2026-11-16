@@ -2,7 +2,7 @@ import { numberFormat } from "../../lib/format";
 import { Component, lazy, Suspense, useCallback, useMemo, useState, useSyncExternalStore, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { shellPoses } from "../../lib/board";
-import { Stage, type StageProps } from "./Stage";
+import { Shells2D, Stage, type StageProps } from "./Stage";
 import { StageResultText } from "./StageResult";
 
 /**
@@ -13,6 +13,8 @@ import { StageResultText } from "./StageResult";
  * lobby never download it (the build fails if it reaches the entry chunk;
  * see vite.config.ts). Without WebGL, or if the 3D stage throws or loses its
  * GPU context, the 2D stage takes over: never a blank board, never a crash.
+ * While the 3D chunk downloads, the 2D shells hold its place, and fade out
+ * once the 3D board's first frame is on screen.
  */
 
 const Stage3D = lazy(() => import("./board3d/Stage3D"));
@@ -38,6 +40,8 @@ function subscribeReduced(onChange: () => void): () => void {
   return () => mq?.removeEventListener("change", onChange);
 }
 const reducedMotion = () => window.matchMedia?.(REDUCED).matches ?? true;
+/** Driven by a test browser (Playwright sets navigator.webdriver): no decorative motion, so nothing on screen depends on timing. */
+const automated = () => typeof navigator !== "undefined" && navigator.webdriver === true;
 
 class StageBoundary extends Component<{ readonly onError: (e: unknown) => void; readonly children: ReactNode }, { failed: boolean }> {
   override state = { failed: false };
@@ -57,6 +61,8 @@ export function BoardStage(props: StageProps) {
   const { t, i18n } = useTranslation();
   const [renderer, setRenderer] = useState<"webgl" | "2d">(() => (webglAvailable() ? "webgl" : "2d"));
   const [ready, setReady] = useState(false);
+  // The 2D shells hold the board until the 3D board's first frame, then fade out and go.
+  const [loaderGone, setLoaderGone] = useState(false);
   const reduced = useSyncExternalStore(subscribeReduced, reducedMotion, () => true);
   const fallBack = useCallback((e?: unknown) => {
     if (e !== undefined) console.warn("3D board unavailable, showing the 2D board:", e);
@@ -73,6 +79,7 @@ export function BoardStage(props: StageProps) {
   if (renderer === "2d") return <Stage {...props} />;
 
   const n = numberFormat(i18n.language).format(show?.faceUp ?? 0);
+  const flicker = !reduced && !automated();
   return (
     <div
       className="relative flex h-full min-h-0 flex-col items-stretch gap-1"
@@ -84,13 +91,24 @@ export function BoardStage(props: StageProps) {
     >
       <div className="relative min-h-0 flex-1" role="img" aria-label={show === null ? t("play.stageWaiting") : t("play.stageLabel", { n })}>
         <div className="diyo-glow pointer-events-none absolute inset-0" aria-hidden="true" />
-        <div className="absolute inset-0">
+        {!loaderGone && (
+          <div
+            className={`pointer-events-none absolute inset-0 flex items-center justify-center transition-opacity duration-300 ${ready ? "opacity-0" : "opacity-100"}`}
+            data-testid="stage-loading"
+            onTransitionEnd={() => setLoaderGone(true)}
+          >
+            <Shells2D show={show} className="h-full max-h-[24rem] w-full max-w-[26rem]" />
+          </div>
+        )}
+        <div className={`absolute inset-0 transition-opacity duration-300 ${ready ? "opacity-100" : "opacity-0"}`}>
           <StageBoundary onError={fallBack}>
             <Suspense fallback={null}>
-              <Stage3D poses={poses} mySeat={mySeat} thrower={thrower} flicker={!reduced} onReady={onReady} onLost={fallBack} />
+              <Stage3D poses={poses} mySeat={mySeat} thrower={thrower} onReady={onReady} onLost={fallBack} />
             </Suspense>
           </StageBoundary>
         </div>
+        {/* The diyo's flicker: an opacity animation on a warm overlay, run by the compositor, never by WebGL. */}
+        {flicker && <div className="lamp-flicker animate-flame pointer-events-none absolute inset-0" aria-hidden="true" data-testid="lamp-flicker" />}
       </div>
       {/* Over the canvas and the floor alike, so it has no edge of its own; the header, seats, result and sheet sit above it. */}
       <div className="board-vignette pointer-events-none fixed inset-0 z-10" aria-hidden="true" />

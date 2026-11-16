@@ -1,7 +1,7 @@
 import { useTexture } from "@react-three/drei";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import type { SeatId } from "@kauda/rules";
-import { useEffect, useLayoutEffect, useMemo, useRef } from "react";
+import { useLayoutEffect, useMemo, useRef } from "react";
 import {
   ACESFilmicToneMapping,
   AdditiveBlending,
@@ -18,7 +18,6 @@ import {
   Quaternion,
   RepeatWrapping,
   SRGBColorSpace,
-  SpotLight,
   Vector2,
   Vector3,
   type Texture,
@@ -38,8 +37,9 @@ import { baseTextures, readPalette, softSpot, type Palette } from "./textures";
  * ambient, soft shadows. The camera sits on my side, about 45 degrees up.
  * The vignette is a CSS overlay (BoardStage), not a post-processing pass.
  *
- * Nothing moves, so the canvas renders on demand; only the optional flicker
- * asks for frames, and never under prefers-reduced-motion.
+ * Nothing moves, so the canvas renders only on demand. The lamp's flicker is
+ * not drawn here: it is a CSS opacity animation on a warm overlay above the
+ * canvas (BoardStage), which costs the GPU nothing in WebGL.
  *
  * No text is drawn in WebGL: seat names, chips and the result are DOM.
  */
@@ -50,7 +50,6 @@ export interface Stage3DProps {
   readonly mySeat: SeatId | null;
   /** The seat whose side of the board glows, or null. */
   readonly thrower: SeatId | null;
-  readonly flicker: boolean;
   /** The first frame with everything loaded is on screen. */
   readonly onReady: () => void;
   /** The GPU dropped the context: the caller falls back to 2D. */
@@ -68,7 +67,7 @@ const FOV = 30;
 const LAMP = new Vector3(-1.75, 1.05, 0.55);
 const KEY_INTENSITY = 11;
 
-export default function Stage3D({ poses, mySeat, thrower, flicker, onReady, onLost }: Stage3DProps) {
+export default function Stage3D({ poses, mySeat, thrower, onReady, onLost }: Stage3DProps) {
   return (
     <Canvas
       frameloop="demand"
@@ -87,17 +86,17 @@ export default function Stage3D({ poses, mySeat, thrower, flicker, onReady, onLo
       }}
       aria-hidden="true"
     >
-      <Scene poses={poses} mySeat={mySeat} thrower={thrower} flicker={flicker} onReady={onReady} />
+      <Scene poses={poses} mySeat={mySeat} thrower={thrower} onReady={onReady} />
     </Canvas>
   );
 }
 
-function Scene({ poses, mySeat, thrower, flicker, onReady }: Omit<Stage3DProps, "onLost">) {
+function Scene({ poses, mySeat, thrower, onReady }: Omit<Stage3DProps, "onLost">) {
   const palette = useMemo(readPalette, []);
   return (
     <>
       <CameraRig />
-      <Lights palette={palette} flicker={flicker} />
+      <Lights palette={palette} />
       <Floor palette={palette} />
       <group rotation-y={boardTurn(mySeat)}>
         <Board />
@@ -182,38 +181,20 @@ function CameraRig() {
 
 // ---------------------------------------------------------------- lights
 
-function Lights({ palette, flicker }: { readonly palette: Palette; readonly flicker: boolean }) {
-  const key = useRef<SpotLight>(null);
+function Lights({ palette }: { readonly palette: Palette }) {
   const target = useMemo(() => {
     const o = new Object3D();
     o.position.set(0.15, 0, -0.1);
     return o;
   }, []);
-  const invalidate = useThree((s) => s.invalidate);
   // A flame is warm but not orange: the diyo's glow, taken halfway to ivory, so the shells stay ivory under it.
   const flame = useMemo(() => palette.color.glow.clone().lerp(palette.color.ink, 0.5), [palette]);
-
-  // The flicker: a slow, uneven breath on the key light. Frames are asked
-  // for about fifteen times a second while it runs, and not at all otherwise.
-  useEffect(() => {
-    if (!flicker) return;
-    const id = window.setInterval(() => invalidate(), 66);
-    return () => window.clearInterval(id);
-  }, [flicker, invalidate]);
-  useFrame(({ clock }) => {
-    const light = key.current;
-    if (light === null) return;
-    const t = clock.elapsedTime;
-    const wobble = flicker ? 0.035 * Math.sin(t * 6.1) + 0.02 * Math.sin(t * 11.7 + 1.3) + 0.012 * Math.sin(t * 23.3 + 0.4) : 0;
-    light.intensity = KEY_INTENSITY * (1 + wobble);
-  });
 
   return (
     <>
       <ambientLight color={flame} intensity={0.32} />
       <primitive object={target} />
       <spotLight
-        ref={key}
         color={flame}
         position={LAMP}
         target={target}

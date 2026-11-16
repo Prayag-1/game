@@ -60,36 +60,50 @@ export function Stage({ result, pending }: StageProps) {
   const { t, i18n } = useTranslation();
   const show = pending ? null : result;
   const n = numberFormat(i18n.language).format(show?.faceUp ?? 0);
-  // A new throw re-mounts the shells, so they settle in afresh.
-  const throwKey = show === null ? "heap" : show.faces.map((f) => (f ? 1 : 0)).join("");
   return (
     <div className="relative flex h-full min-h-0 flex-col items-center justify-center gap-1" data-testid="stage" data-renderer="2d">
       <div className="diyo-glow animate-flicker pointer-events-none absolute -inset-x-16 -inset-y-6" aria-hidden="true" />
-      <svg
-        viewBox="22 9 58 57"
-        preserveAspectRatio="xMidYMax meet"
+      <Shells2D
+        show={show}
         className="relative min-h-0 w-full max-w-[26rem] flex-1 lg:max-h-[24rem]"
-        role="img"
-        aria-label={show === null ? t("play.stageWaiting") : t("play.stageLabel", { n })}
-      >
-        <g key={throwKey} className="animate-settle origin-center [transform-box:fill-box]">
-          {(show === null ? HEAP : THROWN).slice(0, SHELLS).map(([x, y, angle], i) => {
-            const up = show?.faces[i] === true;
-            return (
-              <Shell
-                key={i}
-                up={up}
-                x={x}
-                y={y}
-                angle={angle}
-                state={show === null ? "pending" : up ? "up" : "down"}
-                className={show === null ? "opacity-70" : undefined}
-              />
-            );
-          })}
-        </g>
-      </svg>
+        label={show === null ? t("play.stageWaiting") : t("play.stageLabel", { n })}
+      />
       <StageResultText show={show} />
     </div>
+  );
+}
+
+/**
+ * The sixteen cowries in SVG. The 2D stage draws them, and so does the 3D
+ * board while its chunk is still downloading, so the board is never empty.
+ * Without a label the drawing is decorative (the caller labels the board).
+ */
+export function Shells2D({ show, className, label }: { readonly show: StageResult | null; readonly className: string; readonly label?: string }) {
+  // A new throw re-mounts the shells, so they settle in afresh.
+  const throwKey = show === null ? "heap" : show.faces.map((f) => (f ? 1 : 0)).join("");
+  return (
+    <svg
+      viewBox="22 9 58 57"
+      preserveAspectRatio="xMidYMax meet"
+      className={className}
+      {...(label === undefined ? { "aria-hidden": true } : { role: "img", "aria-label": label })}
+    >
+      <g key={throwKey} className="animate-settle origin-center [transform-box:fill-box]">
+        {(show === null ? HEAP : THROWN).slice(0, SHELLS).map(([x, y, angle], i) => {
+          const up = show?.faces[i] === true;
+          return (
+            <Shell
+              key={i}
+              up={up}
+              x={x}
+              y={y}
+              angle={angle}
+              state={show === null ? "pending" : up ? "up" : "down"}
+              className={show === null ? "opacity-70" : undefined}
+            />
+          );
+        })}
+      </g>
+    </svg>
   );
 }
