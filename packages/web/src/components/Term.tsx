@@ -1,7 +1,7 @@
 import { useId, useState } from "react";
 import { useTranslation } from "react-i18next";
 
-export const TERMS = ["teeya", "chauka", "panja", "chakka", "thini", "hate", "chyakhe", "maryo", "tiryo"] as const;
+export const TERMS = ["teeya", "chauka", "panja", "chakka", "thini", "hate", "chyakhe", "maryo", "tiryo", "ghanti"] as const;
 export type TermId = (typeof TERMS)[number];
 
 /**

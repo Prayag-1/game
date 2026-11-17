@@ -40,7 +40,9 @@ if (!Number.isSafeInteger(guestsPerHour) || guestsPerHour < 1) {
 
 const webDist = process.env.KAUDA_WEB_DIST ? resolve(process.env.KAUDA_WEB_DIST) : undefined;
 // Short phases so an end-to-end test reaches its own throw quickly. Dev only.
-const FAST_TIMINGS = { bettingMs: 2_500, throwingMs: 6_000, revealMs: 1_200, botThrowDelayMs: 300, botBetDelayMs: 300 };
+// The reveal still leaves room for the board to play a whole throw (about 3.5 s),
+// and bots hold the shells 1.5 s as they do at a real table, for the hand to pick them up.
+const FAST_TIMINGS = { bettingMs: 2_500, throwingMs: 6_000, revealMs: 4_500, botThrowDelayMs: 1_500, botBetDelayMs: 300 };
 const fastRounds = process.env.KAUDA_FAST_ROUNDS === "1";
 const proxyOrigins = (process.env.KAUDA_PROXY_ORIGINS ?? "")
   .split(",")

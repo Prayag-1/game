@@ -1,6 +1,7 @@
 import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
+import wasm from "vite-plugin-wasm";
 import { keepThreeOutOfEntry } from "./vite.config";
 
 /**
@@ -11,7 +12,9 @@ import { keepThreeOutOfEntry } from "./vite.config";
  * /e2e/visual/ under `vite preview`, for playwright.visual.config.ts.
  */
 export default defineConfig({
-  plugins: [react(), tailwindcss(), keepThreeOutOfEntry()],
+  plugins: [react(), tailwindcss(), keepThreeOutOfEntry(), wasm()],
+  // The throw's physics worker, built as in the app.
+  worker: { format: "es", plugins: () => [wasm()] },
   css: { postcss: {} },
   build: {
     outDir: "e2e/visual/dist",

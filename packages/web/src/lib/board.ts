@@ -1,4 +1,5 @@
 import { SHELL_COUNT, TURN_ORDER, type SeatId } from "@kauda/rules";
+import { seededRng } from "./throw/rng";
 
 /**
  * The board's geometry and the shells' resting places, as plain numbers.
@@ -64,6 +65,24 @@ export const BOARD = {
   scatterRadius: 0.66,
 } as const;
 
+/**
+ * The rim and the board's edge, as one turned profile: [radius, height] from
+ * the playing surface outwards and down. The 3D board lathes it for the rim
+ * it draws, and the physics for the rim the shells strike.
+ */
+export const RIM_PROFILE: readonly (readonly [number, number])[] = [
+  [BOARD.rimInner - 0.004, BOARD.surface],
+  [BOARD.rimInner + 0.01, BOARD.surface + 0.012],
+  [BOARD.rimInner + 0.022, BOARD.rimTop - 0.012],
+  [BOARD.rimInner + 0.04, BOARD.rimTop - 0.001],
+  [BOARD.rimInner + 0.065, BOARD.rimTop],
+  [BOARD.radius - 0.02, BOARD.rimTop - 0.004],
+  [BOARD.radius - 0.004, BOARD.rimTop - 0.022],
+  [BOARD.radius, BOARD.rimTop - 0.045],
+  [BOARD.radius - 0.004, 0.008],
+  [BOARD.radius - 0.016, 0],
+];
+
 /** A shell at scale 1: length along its own x, width along its own z. About 3:2. */
 export const SHELL = {
   length: 0.21,
@@ -73,6 +92,23 @@ export const SHELL = {
   /** The flatter underside's depth below the base. */
   base: 0.015,
 } as const;
+
+export interface ShellLook {
+  /** About 0.93 to 1.06: no two shells are quite the same size. */
+  readonly scale: number;
+  /** 0 to 1: from the creamier tint to the paler one. */
+  readonly tint: number;
+}
+
+/**
+ * The table's sixteen shells, the same every round and every layout (heap,
+ * scatter, thrown): shell i always has the same size and tint, and always
+ * shows the server's face i.
+ */
+export const SHELL_SET: readonly ShellLook[] = (() => {
+  const rng = seededRng("kauda:the-sixteen-shells");
+  return Array.from({ length: SHELL_COUNT }, () => ({ scale: 0.93 + rng.next() * 0.13, tint: rng.next() }));
+})();
 
 /** The radius of a circle that holds a shell of this scale, however it is turned. */
 export function shellRadius(scale: number): number {
@@ -145,8 +181,7 @@ export function scatter(roundId: string): ShellPose[] {
   for (let attempt = 0; attempt < 100; attempt += 1) {
     const out: ShellPose[] = [];
     for (let i = 0; i < SHELL_COUNT; i += 1) {
-      const scale = 0.93 + next() * 0.13;
-      const tint = next();
+      const { scale, tint } = SHELL_SET[i] as ShellLook;
       const yaw = next() * Math.PI * 2;
       const roll = (next() - 0.5) * 0.08;
       const pitch = (next() - 0.5) * 0.06;
@@ -179,8 +214,10 @@ export function scatter(roundId: string): ShellPose[] {
 export function heap(): ShellPose[] {
   const next = seeded(hash32("heap"));
   const out: ShellPose[] = [];
-  const add = (x: number, z: number, yaw: number, lift = 0, roll = 0, pitch = 0) =>
-    out.push({ x, z, yaw, up: false, scale: 0.94 + next() * 0.11, tint: next(), roll, pitch, lift });
+  const add = (x: number, z: number, yaw: number, lift = 0, roll = 0, pitch = 0) => {
+    const { scale, tint } = SHELL_SET[out.length] as ShellLook;
+    out.push({ x, z, yaw, up: false, scale, tint, roll, pitch, lift });
+  };
   // The bottom layer: one in the middle, a ring of six round it, four outliers.
   add(0, 0, 0.4);
   for (let i = 0; i < 6; i += 1) {

@@ -8,13 +8,23 @@
  * and no 'unsafe-eval' anywhere, scripts only from this origin and
  * Cloudflare's Turnstile, no data: URIs. The Vite build emits no inline
  * script or style and inlines no assets, which is what makes that possible.
+ * Two additions, for the throw's physics (Rapier, WebAssembly, in a Web
+ * Worker): 'wasm-unsafe-eval', which lets the page compile WebAssembly and
+ * nothing else (no eval, no new Function), and worker-src 'self'.
+ *
+ * COMPRESSION. The build writes brotli (.br) and gzip (.gz) copies of every
+ * text asset and the .wasm (vite.config.ts precompress). Each response is
+ * the copy that matches the request's Accept-Encoding, brotli first, with
+ * Content-Encoding and Vary: Accept-Encoding; the copies are never served
+ * under their own names. Hashed files under assets/ are cached for a year,
+ * immutably; the page itself is never cached.
  *
  * Only files that exist in dist/ when the server starts can be served: the
  * request path is looked up in a fixed map, never joined onto a directory,
  * so no path can reach outside dist/. Unknown paths without an extension get
  * index.html (client-side routes such as /table/abc); anything else is a 404.
  */
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { extname, join, relative, sep } from "node:path";
 
@@ -33,6 +43,7 @@ const TYPES: Readonly<Record<string, string>> = {
   ".webp": "image/webp",
   ".txt": "text/plain; charset=utf-8",
   ".webmanifest": "application/manifest+json",
+  ".wasm": "application/wasm",
 };
 
 /** Paths that belong to the server, never to the page. */
@@ -46,7 +57,10 @@ const SERVER_PREFIXES = ["/session/", "/tables", "/ws/", "/matchmake/"];
 export function webContentSecurityPolicy(wsOrigins: readonly string[]): string {
   return [
     "default-src 'none'",
-    `script-src 'self' ${TURNSTILE_ORIGIN}`,
+    // 'wasm-unsafe-eval' compiles WebAssembly only (the throw's physics); it allows no eval of strings.
+    `script-src 'self' 'wasm-unsafe-eval' ${TURNSTILE_ORIGIN}`,
+    // The physics runs in a Web Worker, from this origin only.
+    "worker-src 'self'",
     "style-src 'self'",
     "font-src 'self'",
     "img-src 'self'",
@@ -68,7 +82,37 @@ interface Asset {
   readonly body: Buffer;
   readonly type: string;
   readonly immutable: boolean;
+  /** The build's precompressed copies, when it wrote them. */
+  readonly br?: Buffer;
+  readonly gz?: Buffer;
 }
+
+type Encoding = "br" | "gzip";
+
+/**
+ * The encodings a request accepts, from its Accept-Encoding header: a coding
+ * is acceptable if listed (or covered by *) with a q-value above 0.
+ */
+export function acceptedEncodings(header: string | undefined): Set<Encoding> {
+  const out = new Set<Encoding>();
+  if (header === undefined) return out;
+  const q = new Map<string, number>();
+  for (const part of header.split(",")) {
+    const [name = "", ...params] = part.trim().toLowerCase().split(";");
+    if (name === "") continue;
+    const qParam = params.map((p) => p.trim()).find((p) => p.startsWith("q="));
+    const value = qParam === undefined ? 1 : Number(qParam.slice(2));
+    q.set(name.trim(), Number.isFinite(value) ? value : 0);
+  }
+  const star = q.get("*");
+  for (const coding of ["br", "gzip"] as const) {
+    const v = q.get(coding) ?? star ?? 0;
+    if (v > 0) out.add(coding);
+  }
+  return out;
+}
+
+const readIfThere = (path: string): Buffer | undefined => (existsSync(path) ? readFileSync(path) : undefined);
 
 function walk(dir: string, root: string, into: Map<string, Asset>): void {
   for (const name of readdirSync(dir)) {
@@ -81,7 +125,9 @@ function walk(dir: string, root: string, into: Map<string, Asset>): void {
     if (type === undefined) continue; // not a type we serve (source maps, etc.)
     const path = "/" + relative(root, full).split(sep).join("/");
     // Vite puts content-hashed files under assets/: safe to cache for good.
-    into.set(path, { body: readFileSync(full), type, immutable: path.startsWith("/assets/") });
+    const br = readIfThere(`${full}.br`);
+    const gz = readIfThere(`${full}.gz`);
+    into.set(path, { body: readFileSync(full), type, immutable: path.startsWith("/assets/"), ...(br ? { br } : {}), ...(gz ? { gz } : {}) });
   }
 }
 
@@ -118,8 +164,20 @@ export function webClient(options: { readonly distDir: string; readonly wsOrigin
       if (SERVER_PREFIXES.some((p) => path === p.replace(/\/$/, "") || path.startsWith(p))) return next();
 
       const send = (status: number, asset: Asset, headers: Record<string, string>) => {
-        res.writeHead(status, { ...common, "Content-Type": asset.type, "Content-Length": String(asset.body.length), ...headers });
-        res.end(req.method === "HEAD" ? undefined : asset.body);
+        // The precompressed copy the request accepts, brotli first.
+        const accepted = acceptedEncodings(req.headers["accept-encoding"]);
+        const [encoding, body] =
+          asset.br !== undefined && accepted.has("br") ? (["br", asset.br] as const) : asset.gz !== undefined && accepted.has("gzip") ? (["gzip", asset.gz] as const) : ([null, asset.body] as const);
+        const varies = asset.br !== undefined || asset.gz !== undefined;
+        res.writeHead(status, {
+          ...common,
+          "Content-Type": asset.type,
+          "Content-Length": String(body.length),
+          ...(encoding === null ? {} : { "Content-Encoding": encoding }),
+          ...(varies ? { Vary: "Accept-Encoding" } : {}),
+          ...headers,
+        });
+        res.end(req.method === "HEAD" ? undefined : body);
       };
 
       const file = files.get(path);
@@ -130,7 +188,8 @@ export function webClient(options: { readonly distDir: string; readonly wsOrigin
       if (extname(path) === "" && !path.startsWith("/assets/")) {
         return send(200, index, {
           "Content-Security-Policy": webContentSecurityPolicy(options.wsOrigins()),
-          "Cache-Control": "no-cache",
+          // Never cached: it names the hashed files of the current build.
+          "Cache-Control": "no-store",
         });
       }
       res.writeHead(404, { ...common, "Content-Type": "text/plain; charset=utf-8" });

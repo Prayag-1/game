@@ -118,6 +118,16 @@ A player who actually plays should confirm them.
 - After finishing any task, run the tests. Never commit or push: the owner
   does that. Only stop to ask if a test fails or a decision is genuinely
   the owner's.
+- The thrower's hand is one swappable component:
+  `packages/web/src/components/table/board3d/Hand.tsx`. Its whole interface
+  is `HandProps`: `seat` (the side it enters from and withdraws to),
+  `frame` (a ref to the current `HandFrame`, written every frame: `phase`
+  and `progress`, wrist position and rotation, the palm `anchor`, where the
+  forearm runs, the pose as joint angles, opacity), and `onRelease` (subscribe
+  to the instant the shells leave the hand). Timing lives outside the model,
+  in `lib/throw/handSequence.ts` and `lib/throw/director.ts`. A rigged hand
+  replaces that one file, maps `phase`/`progress` to its own clips, and
+  keeps its palm on `anchor`; nothing else changes.
 - Later phase, not built: an `auth_methods` table to link a Google or phone login to a guest account (today a guest is only its session cookie).
 
 ## Build order

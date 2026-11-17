@@ -19,10 +19,12 @@ export interface PhaseBarProps {
   readonly phaseEndsAt: number | null;
   readonly stake: number;
   readonly multiplier: number;
+  /** The stake has doubled as far as the house rules let it. */
+  readonly atCap?: boolean;
 }
 
 /** A quiet strip over the board: the phase, its countdown, and the stake. */
-export function PhaseBar({ phase, phaseEndsAt, stake, multiplier }: PhaseBarProps) {
+export function PhaseBar({ phase, phaseEndsAt, stake, multiplier, atCap = false }: PhaseBarProps) {
   const { t, i18n } = useTranslation();
   const seconds = useCountdown(phaseEndsAt);
   const fmt = numberFormat(i18n.language);
@@ -38,7 +40,15 @@ export function PhaseBar({ phase, phaseEndsAt, stake, multiplier }: PhaseBarProp
       )}
       <span className="ml-auto text-ink tabular-nums" title={t("play.stakeTip")} data-testid="stake">
         <span className="text-ink-muted">{t("play.stake")}</span> <span className="font-semibold">{fmt.format(stake)}</span>{" "}
-        <span className="font-semibold text-brass">{t("play.multiplier", { n: fmt.format(multiplier) })}</span>
+        {/* A short pulse each time the stake doubles. */}
+        <span key={multiplier} className={`inline-block font-semibold text-brass ${multiplier > 1 ? "animate-pulse-once" : ""}`} data-testid="multiplier" data-multiplier={multiplier}>
+          {t("play.multiplier", { n: fmt.format(multiplier) })}
+        </span>
+        {atCap && (
+          <span className="ml-1 rounded-full border border-brass/50 px-1.5 text-xs text-brass" title={t("play.stakeCapTip")} data-testid="stake-cap">
+            {t("play.stakeCap")}
+          </span>
+        )}
       </span>
     </div>
   );

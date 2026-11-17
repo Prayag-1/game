@@ -125,6 +125,10 @@
     "tiryo": {
       "label": "ति-र्यो",
       "tip": "Ti-ryo: a miss, the thrower pays"
+    },
+    "ghanti": {
+      "label": "घण्टी",
+      "tip": "Ghanti: paid by the thrower on the first hit of a turn, shared among the other seats"
     }
   },
   "errors": {
@@ -170,6 +174,7 @@
     "cancelReservation": "Cancel reservation",
     "throw": "Throw",
     "yourThrow": "Your turn! Throw the shells.",
+    "pickingUp": "Picking up the shells…",
     "myChips": "My chips",
     "seatedAs": "You are on {{seat}}",
     "watching": "You are a chyakhe (outside bettor)",
@@ -206,7 +211,13 @@
     "checkPublished": "Same commitment as shown before betting",
     "checkFaces": "Seed gives the same shells and winner",
     "notSeenPublished": "(this page joined late and did not see the commitment)",
-    "wins": "wins!"
+    "wins": "wins!",
+    "push": "{{seat}} is empty: nobody is paid",
+    "stakeCap": "cap",
+    "stakeCapTip": "The stake has reached its cap and will not double again",
+    "betBy": "{{name}}: {{chips}} chips",
+    "myBet": "Your bet",
+    "countLabel": "Counting the shells face up"
   },
   "refusals": {
     "wrong-phase": "You can't do that right now.",
@@ -222,6 +233,7 @@
     "thrower-cannot-cover": "The thrower can't cover a bet that size.",
     "no-bet": "You have no bet.",
     "not-thrower": "It isn't your throw.",
+    "not-yet": "Wait a moment: the shells are still being picked up.",
     "not-at-table": "You are not at the table.",
     "table-full": "The table is full.",
     "table-paused": "The table is paused.",

@@ -7,11 +7,17 @@ const SIZES = {
   desktop: { width: 1440, height: 900 },
 } as const;
 
-/** The table's board is WebGL: wait until its first full frame is drawn. */
+/**
+ * The table's board is WebGL: wait until its first full frame is drawn, and
+ * the shells lie still where the physics left the fixture's last round
+ * (simulated in the worker from the round id, so the same every run).
+ */
 async function boardReady(page: Page): Promise<void> {
   const stage = page.getByTestId("stage");
   await expect(stage).toHaveAttribute("data-renderer", "webgl");
   await expect(stage).toHaveAttribute("data-ready", "true", { timeout: 20_000 });
+  await expect(stage).toHaveAttribute("data-layout", "sim", { timeout: 20_000 });
+  await expect(stage).toHaveAttribute("data-throw", "still");
 }
 
 async function open(page: Page, screen: string): Promise<void> {
@@ -44,12 +50,38 @@ for (const [size, viewport] of Object.entries(SIZES)) {
       await expect(page.getByTestId("stage-result")).toBeVisible();
       await expect(page.getByTestId("winning-seat")).toHaveAttribute("data-seat", "chakka");
       await expect(page.getByTestId("seat-teeya")).toHaveAttribute("data-me", "true");
+      // The final state: the result's side lit (a hit for chakka), every face-up shell lit.
+      await expect(page.getByTestId("seat-chakka")).toHaveAttribute("data-highlight", "hit");
+      await expect(page.getByTestId("stage")).toHaveAttribute("data-glow-kind", "hit");
       if (size === "desktop") {
         // The side panel is open on a wide screen, every check a green tick.
         await expect(page.getByTestId("log-row")).toHaveCount(7);
         await expect(page.locator('[data-testid="round-log"] [data-check="ok"]')).toHaveCount(7);
       }
       await expect(page).toHaveScreenshot(`table-${size}.png`);
+    });
+
+    test.describe("with motion allowed", () => {
+      // The hand is motion: none under reduced motion. Automated browsers keep the held hand still (no idle shake), so the frame is stable.
+      test.use({ reducedMotion: "no-preference" });
+      test("table, my hand holding the shells over the board", async ({ page }) => {
+        await open(page, "hand");
+        const stage = page.getByTestId("stage");
+        await expect(stage).toHaveAttribute("data-renderer", "webgl");
+        await expect(stage).toHaveAttribute("data-ready", "true", { timeout: 20_000 });
+        await expect(stage).toHaveAttribute("data-hand", "hold", { timeout: 20_000 });
+        await expect(stage).toHaveAttribute("data-hand-anchored", "true", { timeout: 20_000 });
+        await expect(page).toHaveScreenshot(`table-hand-${size}.png`);
+      });
+
+      test("table, part-way through counting the shells", async ({ page }) => {
+        await open(page, "count");
+        await boardReady(page);
+        // Frozen three shells into the count: no result, no chips moved yet.
+        await expect(page.getByTestId("stage-count")).toHaveAttribute("data-count", "3");
+        await expect(page.getByTestId("winning-seat")).toHaveCount(0);
+        await expect(page).toHaveScreenshot(`table-count-${size}.png`);
+      });
     });
 
     if (size === "phone") {

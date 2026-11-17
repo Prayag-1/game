@@ -2,7 +2,7 @@ import type { Client, Room } from "@colyseus/sdk";
 import { api, type Result, type SeatGrant } from "./api";
 import type { Command } from "./protocol";
 import { useSession, type Notice } from "./session";
-import { ingest, initialTableState, useTable } from "./tableStore";
+import { ingest, initialTableState, resetThrowHold, useTable } from "./tableStore";
 
 /**
  * The socket adapter: the only code that touches the Colyseus room. It feeds
@@ -181,6 +181,7 @@ export async function logout(): Promise<void> {
 
 /** For tests. */
 export function resetTableForTests(): void {
+  resetThrowHold();
   clearTimeout(retryTimer);
   room = null;
   client = null;

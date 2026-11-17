@@ -1,7 +1,7 @@
 import { numberFormat } from "../../lib/format";
-import { Component, lazy, Suspense, useCallback, useMemo, useState, useSyncExternalStore, type ReactNode } from "react";
+import { Component, lazy, Suspense, useCallback, useEffect, useMemo, useState, useSyncExternalStore, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { shellPoses } from "../../lib/board";
+import type { BoardStatus } from "./board3d/Stage3D";
 import { Shells2D, Stage, type StageProps } from "./Stage";
 import { StageResultText } from "./StageResult";
 
@@ -57,7 +57,7 @@ class StageBoundary extends Component<{ readonly onError: (e: unknown) => void; 
 }
 
 export function BoardStage(props: StageProps) {
-  const { result, pending, mySeat = null, thrower = null } = props;
+  const { result, pending, mySeat = null, glow = null, counting = null, lit = null, round = null, reveal = null, pressed = false, onRevealed, onAnimator, onSound } = props;
   const { t, i18n } = useTranslation();
   const [renderer, setRenderer] = useState<"webgl" | "2d">(() => (webglAvailable() ? "webgl" : "2d"));
   const [ready, setReady] = useState(false);
@@ -69,12 +69,28 @@ export function BoardStage(props: StageProps) {
     setRenderer("2d");
   }, []);
   const onReady = useCallback(() => setReady(true), []);
+  const [status, setStatus] = useState<BoardStatus>({ layout: "heap", phase: "still", hand: "none", handAnchored: false });
+  const revealed = useCallback((id: string) => onRevealed?.(id), [onRevealed]);
 
+  // Only a 3D board that is on screen can play a throw: the page holds a result back only then.
+  const animating = renderer === "webgl" && ready;
+  useEffect(() => {
+    onAnimator?.(animating);
+    return () => onAnimator?.(false);
+  }, [animating, onAnimator]);
+
+  // The text says "still to be thrown" while a round waits for its throw...
   const show = pending ? null : result;
-  const throwShown = show === null ? null : { roundId: show.roundId, faces: show.faces };
-  const poseKey = throwShown === null ? "heap" : `${throwShown.roundId}:${throwShown.faces.map((f) => (f ? 1 : 0)).join("")}`;
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- poseKey captures everything the poses depend on
-  const poses = useMemo(() => shellPoses(throwShown), [poseKey]);
+  // ...but the shells lie where the last throw left them until they are gathered for the next.
+  const shownKey = result === null ? "" : `${result.roundId}:${result.thrower}:${result.faces.map((f) => (f ? 1 : 0)).join("")}`;
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- shownKey captures everything
+  const shown = useMemo(() => (result === null ? null : { roundId: result.roundId, faces: result.faces, thrower: result.thrower }), [shownKey]);
+  const revealKey = reveal === null ? "" : `${reveal.roundId}:${reveal.thrower}:${reveal.faces.map((f) => (f ? 1 : 0)).join("")}`;
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- revealKey captures everything
+  const playing = useMemo(() => (reveal === null ? null : { roundId: reveal.roundId, faces: reveal.faces, thrower: reveal.thrower }), [revealKey]);
+  const roundKey = round === null ? "" : `${round.roundId}:${round.thrower}:${round.phase}`;
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- roundKey captures everything
+  const current = useMemo(() => round, [roundKey]);
 
   if (renderer === "2d") return <Stage {...props} />;
 
@@ -86,8 +102,14 @@ export function BoardStage(props: StageProps) {
       data-testid="stage"
       data-renderer="webgl"
       data-ready={ready ? "true" : "false"}
-      data-shells={poses.length}
-      data-shells-up={poses.filter((p) => p.up).length}
+      data-shells={16}
+      data-shells-up={result === null ? 0 : result.faces.filter(Boolean).length}
+      data-layout={status.layout}
+      data-glow-seat={glow?.seat ?? "none"}
+      data-glow-kind={glow?.kind ?? "none"}
+      data-throw={status.phase}
+      data-hand={status.hand}
+      data-hand-anchored={status.handAnchored ? "true" : "false"}
     >
       <div className="relative min-h-0 flex-1" role="img" aria-label={show === null ? t("play.stageWaiting") : t("play.stageLabel", { n })}>
         <div className="diyo-glow pointer-events-none absolute inset-0" aria-hidden="true" />
@@ -97,13 +119,28 @@ export function BoardStage(props: StageProps) {
             data-testid="stage-loading"
             onTransitionEnd={() => setLoaderGone(true)}
           >
-            <Shells2D show={show} className="h-full max-h-[24rem] w-full max-w-[26rem]" />
+            <Shells2D show={show} lit={lit} className="h-full max-h-[24rem] w-full max-w-[26rem]" />
           </div>
         )}
         <div className={`absolute inset-0 transition-opacity duration-300 ${ready ? "opacity-100" : "opacity-0"}`}>
           <StageBoundary onError={fallBack}>
             <Suspense fallback={null}>
-              <Stage3D poses={poses} mySeat={mySeat} thrower={thrower} onReady={onReady} onLost={fallBack} />
+              <Stage3D
+                current={current}
+                shown={shown}
+                reveal={playing}
+                pressed={pressed}
+                reduced={reduced}
+                quiet={automated()}
+                onRevealed={revealed}
+                {...(onSound === undefined ? {} : { onSound })}
+                onStatus={setStatus}
+                mySeat={mySeat}
+                glow={glow}
+                lit={lit}
+                onReady={onReady}
+                onLost={fallBack}
+              />
             </Suspense>
           </StageBoundary>
         </div>
@@ -113,7 +150,7 @@ export function BoardStage(props: StageProps) {
       {/* Over the canvas and the floor alike, so it has no edge of its own; the header, seats, result and sheet sit above it. */}
       <div className="board-vignette pointer-events-none fixed inset-0 z-10" aria-hidden="true" />
       <div className="relative z-20">
-        <StageResultText show={show} />
+        <StageResultText show={show} counting={counting} />
       </div>
     </div>
   );

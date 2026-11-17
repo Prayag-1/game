@@ -69,7 +69,11 @@ export function harness(
     playRound: (throwerId) => {
       h.advance(table.timings.bettingMs);
       if (throwerId === undefined) h.advance(table.timings.throwingMs);
-      else h.ok(table.handle(throwerId, { type: "throw" }));
+      else {
+        // A human thrower holds the shells as long as a bot does before the server takes a throw.
+        h.advance(table.timings.botThrowDelayMs);
+        h.ok(table.handle(throwerId, { type: "throw" }));
+      }
       h.advance(table.timings.revealMs);
     },
     ok: (result) => {

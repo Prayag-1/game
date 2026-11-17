@@ -22,7 +22,7 @@ vi.mock("../src/components/table/board3d/Stage3D", () => ({
   },
 }));
 
-const RESULT = { roundId: "t:1", faces: Array.from({ length: 16 }, (_, i) => i < 5), faceUp: 5, winningSeat: "panja", hit: true } as const;
+const RESULT = { roundId: "t:1", faces: Array.from({ length: 16 }, (_, i) => i < 5), faceUp: 5, winningSeat: "panja", hit: true, thrower: "panja", push: false } as const;
 
 /** Pretends the browser has WebGL, or that it has the API but refuses a context (blocklisted GPU, WebGL disabled). */
 function fakeWebGL(context: boolean): void {
@@ -41,12 +41,14 @@ describe("board stage fallback", () => {
     chunk.mode = "throw";
     fakeWebGL(false);
     expect(webglAvailable()).toBe(false);
-    render(<BoardStage result={RESULT} pending={false} mySeat="teeya" thrower="panja" />);
+    render(<BoardStage result={RESULT} pending={false} mySeat="teeya" glow={{ seat: "panja", kind: "thrower" }} />);
     const stage = screen.getByTestId("stage");
     expect(stage).toHaveAttribute("data-renderer", "2d");
     expect(stage.querySelectorAll("[data-shell]")).toHaveLength(16);
     expect(stage.querySelectorAll('[data-shell="up"]')).toHaveLength(5);
     expect(screen.getByTestId("winning-seat")).toHaveTextContent("पञ्जा");
+    // No hand on the 2D board.
+    expect(stage).not.toHaveAttribute("data-hand");
   });
 
   it("draws the 2D stage when the browser has no WebGL at all", () => {
@@ -62,7 +64,7 @@ describe("board stage fallback", () => {
     expect(webglAvailable()).toBe(true);
     vi.spyOn(console, "error").mockImplementation(() => {});
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    render(<BoardStage result={RESULT} pending={false} mySeat="chauka" thrower={null} />);
+    render(<BoardStage result={RESULT} pending={false} mySeat="chauka" glow={null} />);
     expect(screen.getByTestId("stage")).toHaveAttribute("data-renderer", "webgl");
     expect(screen.getByTestId("stage")).toHaveAttribute("data-shells-up", "5");
     await waitFor(() => expect(screen.getByTestId("stage")).toHaveAttribute("data-renderer", "2d"));
@@ -76,7 +78,7 @@ describe("board stage while the 3D chunk loads", () => {
   it("shows the 2D shells in the board area until the 3D board's first frame", async () => {
     chunk.mode = "load";
     fakeWebGL(true);
-    render(<BoardStage result={RESULT} pending={false} mySeat="teeya" thrower="panja" />);
+    render(<BoardStage result={RESULT} pending={false} mySeat="teeya" glow={{ seat: "panja", kind: "thrower" }} />);
     const stage = screen.getByTestId("stage");
     expect(stage).toHaveAttribute("data-renderer", "webgl");
     expect(stage).toHaveAttribute("data-ready", "false");
@@ -94,7 +96,7 @@ describe("board stage while the 3D chunk loads", () => {
   it("fades the 2D shells out once the 3D board is drawn, then removes them", async () => {
     chunk.mode = "ready";
     fakeWebGL(true);
-    render(<BoardStage result={RESULT} pending={false} mySeat="teeya" thrower="panja" />);
+    render(<BoardStage result={RESULT} pending={false} mySeat="teeya" glow={{ seat: "panja", kind: "thrower" }} />);
     await waitFor(() => expect(screen.getByTestId("stage")).toHaveAttribute("data-ready", "true"));
     const loading = screen.getByTestId("stage-loading");
     expect(loading).toHaveClass("opacity-0");
@@ -108,7 +110,7 @@ describe("the lamp's flicker", () => {
     chunk.mode = "ready";
     fakeWebGL(true);
     motionAllowed();
-    render(<BoardStage result={RESULT} pending={false} mySeat="teeya" thrower={null} />);
+    render(<BoardStage result={RESULT} pending={false} mySeat="teeya" glow={null} />);
     const overlay = screen.getByTestId("lamp-flicker");
     expect(overlay).toHaveClass("animate-flame");
     expect(overlay).toHaveAttribute("aria-hidden", "true");

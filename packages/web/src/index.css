@@ -59,6 +59,10 @@
   --color-shell-shade: #c2ab84;
   --color-shell-slit: #3b2416;
 
+  /* The thrower's hand: a warm brown skin, a plain dark sleeve */
+  --color-skin: #8d5b3c;
+  --color-sleeve: #2a201b;
+
   --radius-panel: 0.875rem;
   --radius-control: 0.625rem;
 
@@ -71,6 +75,9 @@
   --animate-flicker: flicker 5s ease-in-out infinite alternate;
   /* The diyo over the 3D board: quicker and less even than flicker, as a flame is. */
   --animate-flame: flame 3.1s ease-in-out infinite alternate;
+  /* A chip change rising off a panel, and a one-off pulse (the stake doubling, a hit). */
+  --animate-float: float-up 1.5s ease-out both;
+  --animate-pulse-once: pulse-once 900ms ease-out both;
 
   @keyframes rise {
     from {
@@ -104,6 +111,33 @@
     }
     100% {
       opacity: 0.97;
+    }
+  }
+  @keyframes float-up {
+    0% {
+      opacity: 0;
+      transform: translateY(4px);
+    }
+    15% {
+      opacity: 1;
+    }
+    70% {
+      opacity: 1;
+    }
+    100% {
+      opacity: 0;
+      transform: translateY(-22px);
+    }
+  }
+  @keyframes pulse-once {
+    0% {
+      transform: scale(1);
+    }
+    35% {
+      transform: scale(1.18);
+    }
+    100% {
+      transform: scale(1);
     }
   }
   @keyframes flame {
@@ -235,6 +269,13 @@
   }
   .shell-slit {
     fill: var(--color-shell-slit);
+  }
+  /* The count on the 2D board: face-up shells light in brass, face-down ones dim. */
+  .shell-lit {
+    filter: drop-shadow(0 0 1.6px var(--color-brass-bright)) drop-shadow(0 0 0.8px var(--color-brass));
+  }
+  .shell-dim {
+    opacity: 0.55;
   }
   .shell-tooth {
     stroke: var(--color-shell-shade);

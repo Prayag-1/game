@@ -2,6 +2,8 @@ import { numberFormat } from "../lib/format";
 import { useTranslation } from "react-i18next";
 import { useMyChips } from "../lib/chips";
 import { useSession } from "../lib/session";
+import { useTable } from "../lib/tableStore";
+import { signed } from "../lib/useCeremony";
 import { logout } from "../lib/table";
 import { LanguageToggle } from "./LanguageToggle";
 import { ShellRow } from "./Shell";
@@ -12,6 +14,10 @@ export function Header() {
   const me = useSession((s) => s.me);
   const chips = useMyChips();
   const format = numberFormat(i18n.language);
+  // My own change after a round, as the tokens land: the server's delta.
+  // (Select the store's own object: a selector that builds a new one each time re-renders forever.)
+  const changed = useTable((s) => s.changed);
+  const myDelta = me === null || changed === null ? null : { d: changed.deltas[me.id] ?? 0, reduced: changed.reduced };
   return (
     <header className="sticky top-0 z-20 h-14 border-b border-line bg-bg/75 backdrop-blur-md">
       <div className="mx-auto flex h-full max-w-7xl items-center gap-3 px-4 lg:px-6">
@@ -24,7 +30,15 @@ export function Header() {
                 {me.name}
               </span>
               <span className="text-xs text-ink-muted tabular-nums" title={t("header.chipsTip")} data-testid="my-chips">
-                {t("header.chips")}: <span className="font-semibold text-brass">{chips === null ? "–" : format.format(chips)}</span>
+                {t("header.chips")}:{" "}
+                <span className={`relative font-semibold ${myDelta?.reduced === true && myDelta.d !== 0 ? "rounded-sm bg-brass/25 text-brass-bright" : "text-brass"}`}>
+                  {chips === null ? "–" : format.format(chips)}
+                  {myDelta !== null && !myDelta.reduced && myDelta.d !== 0 && (
+                    <span className={`animate-float pointer-events-none absolute -top-3 -right-1 text-xs font-bold ${myDelta.d > 0 ? "text-ok" : "text-sindoor-ink"}`} data-testid="my-chips-float" data-delta={myDelta.d}>
+                      {signed(myDelta.d, (n) => format.format(n))}
+                    </span>
+                  )}
+                </span>
               </span>
             </div>
           )}

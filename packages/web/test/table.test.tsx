@@ -279,7 +279,7 @@ describe("fairness check", () => {
 // ----------------------------------------------------------- stage and seats
 
 describe("stage", () => {
-  const RESULT = { roundId: "t:1", faces: FACES, faceUp: 8, winningSeat: "chauka", hit: false } as const;
+  const RESULT = { roundId: "t:1", faces: FACES, faceUp: 8, winningSeat: "chauka", hit: false, thrower: "teeya", push: false } as const;
 
   it("draws sixteen shells, slit side showing when up, with the count and the winner in Nepali", () => {
     render(<Stage result={RESULT} pending={false} />);

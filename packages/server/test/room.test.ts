@@ -321,7 +321,8 @@ describe("KaudaRoom", () => {
     const credits = room.table.ledger.entries().filter((e) => e.playerId === a.playerId && e.reason !== "round");
     expect(credits).toEqual([expect.objectContaining({ reason: "buyin", chips: room.table.standardBuyIn })]);
     await until(() => !presentHere(watcher.view(), a.playerId), "clients to see it");
-  });
+    // Three whole rounds, run in 500 ms steps of table time, each waiting a real tick: longer than the default 5 s.
+  }, 20_000);
 
   it("also ends the window after 60 seconds, if fewer than 3 rounds have run", async () => {
     const a = await seatedOnTeeya();

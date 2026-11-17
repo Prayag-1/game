@@ -134,7 +134,7 @@ PAIRS.push(
 
 describe("design tokens", () => {
   it("are all in index.css, and readable", () => {
-    for (const name of ["bg", "wood", "wood-light", "panel", "panel-strong", "line", "ink", "ink-muted", "brass", "brass-bright", "sindoor", "sindoor-bright", "sindoor-ink", "ok", "bad", "glow", "shell", "shell-slit"]) {
+    for (const name of ["bg", "wood", "wood-light", "panel", "panel-strong", "line", "ink", "ink-muted", "brass", "brass-bright", "sindoor", "sindoor-bright", "sindoor-ink", "ok", "bad", "glow", "shell", "shell-slit", "skin", "sleeve"]) {
       expect(tokens[name], `--color-${name}`).toBeDefined();
     }
     expect(glowPercent).toBeGreaterThan(0);

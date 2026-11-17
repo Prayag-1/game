@@ -21,6 +21,7 @@ describe("a round", () => {
 
     h.advance(8_000);
     expect(h.table.phase).toBe("throwing");
+    h.advance(h.table.timings.botThrowDelayMs); // the hand picks the shells up first
     h.ok(h.table.handle("A", { type: "throw" }));
     expect(h.table.phase).toBe("revealing");
 
@@ -31,7 +32,7 @@ describe("a round", () => {
     expect(h.table.balance("B")).toBe(990);
     h.table.ledger.verify();
 
-    h.advance(4_500);
+    h.advance(h.table.timings.revealMs);
     expect(h.table.phase).toBe("betting");
     expect(h.table.view().thrower).toBe("teeya");
   });
@@ -77,24 +78,31 @@ describe("a round", () => {
     expect(h.table.records()).toHaveLength(1);
   });
 
-  it("refuses a throw from anyone but the thrower, or outside the throwing phase", () => {
+  it("refuses a throw from anyone but the thrower, outside the throwing phase, or before the hand has the shells", () => {
     const h = harness();
     seatFour(h);
     h.advance(0);
     expect(h.table.handle("A", { type: "throw" })).toEqual({ ok: false, reason: "wrong-phase" });
     h.advance(8_000);
     expect(h.table.handle("B", { type: "throw" })).toEqual({ ok: false, reason: "not-thrower" });
+    // The thrower holds the shells as long as a bot does: 1.5 s before the server takes the throw.
+    expect(h.table.handle("A", { type: "throw" })).toEqual({ ok: false, reason: "not-yet" });
+    h.advance(h.table.timings.botThrowDelayMs - 1);
+    expect(h.table.handle("A", { type: "throw" })).toEqual({ ok: false, reason: "not-yet" });
+    h.advance(1);
+    h.ok(h.table.handle("A", { type: "throw" }));
   });
 
-  it("has a seated bot throw promptly", () => {
+  it("has a seated bot hold the shells 1.5 s, for its hand to pick them up, then throw", () => {
     const h = harness();
     h.ok(h.table.join("A", { name: "A", buyIn: 1000 }));
     h.ok(h.table.join("bot", { name: "bot", isBot: true, buyIn: 1000 }));
     h.ok(h.table.handle("bot", { type: "sit", seat: "teeya" }));
     h.ok(h.table.handle("A", { type: "sit", seat: "chauka" }));
     h.advance(0);
-    h.advance(8_000);
-    h.advance(1_199);
+    expect(h.table.timings.botThrowDelayMs).toBe(1_500);
+    h.advance(h.table.timings.bettingMs);
+    h.advance(1_499);
     expect(h.table.records()).toHaveLength(0);
     h.advance(1);
     expect(h.table.records()).toHaveLength(1);
@@ -209,6 +217,7 @@ describe("commit-reveal", () => {
     const betting = JSON.stringify(h.table.view());
     h.advance(4_000);
     const throwing = JSON.stringify(h.table.view());
+    h.advance(h.table.timings.botThrowDelayMs); // the hand picks the shells up first
     h.ok(h.table.handle("A", { type: "throw" }));
     const revealed = JSON.stringify(h.table.view());
 
@@ -218,7 +227,7 @@ describe("commit-reveal", () => {
     expect(revealed).toContain(seed);
 
     // The next round's seed is not visible either, once its betting opens.
-    h.advance(4_500);
+    h.advance(h.table.timings.revealMs);
     const next = JSON.stringify(h.table.view());
     h.playRound("A");
     expect(next).not.toContain(lastRecord(h.table).seed);
@@ -393,6 +402,7 @@ describe("seating", () => {
     expect(h.table.handle("B", { type: "stand" })).toEqual({ ok: false, reason: "wrong-phase" });
     h.advance(8_000);
     expect(h.table.handle("B", { type: "stand" })).toEqual({ ok: false, reason: "wrong-phase" });
+    h.advance(h.table.timings.botThrowDelayMs); // the hand picks the shells up first
     h.ok(h.table.handle("A", { type: "throw" }));
     // Revealing is between rounds.
     h.ok(h.table.handle("B", { type: "stand" }));
@@ -410,9 +420,10 @@ describe("seating", () => {
     h.advance(0);
     expect(h.table.phase).toBe("betting");
     h.advance(8_000);
+    h.advance(h.table.timings.botThrowDelayMs); // the hand picks the shells up first
     h.ok(h.table.handle("A", { type: "throw" }));
     h.ok(h.table.handle("B", { type: "stand" }));
-    h.advance(4_500);
+    h.advance(h.table.timings.revealMs);
     expect(h.table.phase).toBe("waiting");
     h.advance(60_000);
     expect(h.table.records()).toHaveLength(1);
@@ -429,7 +440,7 @@ describe("seating", () => {
     h.advance(0);
     expect(h.table.phase).toBe("betting");
     h.table.setConnected("H", false);
-    h.advance(8_000 + 1_200 + 4_500);
+    h.advance(h.table.timings.bettingMs + h.table.timings.botThrowDelayMs + h.table.timings.revealMs);
     expect(h.table.phase).toBe("waiting");
   });
 

@@ -2,6 +2,7 @@ import { numberFormat } from "../../lib/format";
 import { SEAT_NUMBER, type SeatId } from "@kauda/rules";
 import { useTranslation } from "react-i18next";
 import type { PlayerView } from "../../lib/protocol";
+import { signed } from "../../lib/useCeremony";
 import { Term } from "../Term";
 
 export interface SeatReservation {
@@ -23,6 +24,16 @@ export interface SeatCardProps {
   readonly sitDisabled: boolean;
   readonly onSit: () => void;
   readonly onCancelReservation: () => void;
+  /** The chips to show, when they differ from the player's (ticking after a round); the player's by default. */
+  readonly chips?: number;
+  /** A chip change rising off the panel as the tokens land: the server's delta. */
+  readonly float?: number | null;
+  /** Under reduced motion: the chips just changed, highlighted for a moment instead. */
+  readonly flash?: boolean;
+  /** The result: this seat collects (a hit, the thrower) or is paid (a miss, the winner). */
+  readonly highlight?: "hit" | "win" | null;
+  /** The thrower is throwing again after a hit: the stake multiplier, and whether it is at its cap. */
+  readonly streak?: { readonly multiplier: number; readonly atCap: boolean } | null;
 }
 
 /**
@@ -31,9 +42,14 @@ export interface SeatCardProps {
  */
 export function SeatCard(props: SeatCardProps) {
   const { t, i18n } = useTranslation();
-  const { seat, player, isMe, isThrower, reservation, betsTotal, canSit, sitDisabled } = props;
+  const { seat, player, isMe, isThrower, reservation, betsTotal, canSit, sitDisabled, float = null, flash = false, highlight = null, streak = null } = props;
   const fmt = numberFormat(i18n.language);
-  const edge = isThrower
+  const shown = props.chips ?? player?.chips ?? 0;
+  const edge = highlight === "hit"
+    ? "animate-pulse-once border-brass-bright shadow-glow-brass"
+    : highlight === "win"
+      ? "border-brass/60 shadow-glow-brass"
+      : isThrower
     ? "border-brass/70 shadow-glow-brass"
     : reservation !== null
       ? "border-transparent outline-1 outline-dashed outline-brass/60 shadow-panel"
@@ -45,6 +61,7 @@ export function SeatCard(props: SeatCardProps) {
       data-testid={`seat-${seat}`}
       data-thrower={isThrower ? "true" : undefined}
       data-me={isMe ? "true" : undefined}
+      data-highlight={highlight ?? undefined}
       aria-label={t(`terms.${seat}.label`)}
       className={`relative flex min-w-0 flex-col gap-0.5 rounded-panel border bg-panel px-2 pb-2 text-sm backdrop-blur-md transition-shadow duration-300 lg:px-3 ${isThrower ? "pt-3.5" : "pt-1.5 lg:pt-2"} ${edge}`}
     >
@@ -69,9 +86,34 @@ export function SeatCard(props: SeatCardProps) {
       <div className="leading-tight [overflow-wrap:anywhere] text-ink" data-testid="occupant">
         {player === null ? <span className="text-ink-muted">{t("play.empty")}</span> : player.name}
       </div>
+      {streak !== null && (
+        <span
+          key={streak.multiplier}
+          className="animate-pulse-once absolute -top-2.5 right-1 rounded-full border border-brass/60 bg-panel-strong px-1.5 text-[0.7rem] leading-5 font-semibold text-brass tabular-nums"
+          data-testid="streak"
+          data-multiplier={streak.multiplier}
+          title={streak.atCap ? t("play.stakeCapTip") : undefined}
+        >
+          {t("play.multiplier", { n: fmt.format(streak.multiplier) })}
+          {streak.atCap && <span className="ml-1 text-ink-muted">{t("play.stakeCap")}</span>}
+        </span>
+      )}
       {player !== null && (
-        <div className="font-semibold text-brass tabular-nums" data-testid="seat-chips">
-          {t("play.chips", { chips: fmt.format(player.chips) })}
+        <div
+          className={`relative font-semibold tabular-nums transition-colors ${flash ? "rounded-sm bg-brass/25 text-brass-bright" : "text-brass"}`}
+          data-testid="seat-chips"
+          data-chips={shown}
+        >
+          {t("play.chips", { chips: fmt.format(shown) })}
+          {float !== null && float !== 0 && (
+            <span
+              className={`animate-float pointer-events-none absolute -top-1 right-0 text-sm font-bold ${float > 0 ? "text-ok" : "text-sindoor-ink"}`}
+              data-testid="chip-float"
+              data-delta={float}
+            >
+              {signed(float, (n) => fmt.format(n))}
+            </span>
+          )}
         </div>
       )}
       {(player?.isBot === true || isMe || (player !== null && !player.isBot && !player.connected)) && (

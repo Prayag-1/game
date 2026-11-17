@@ -8,7 +8,7 @@ import { CanvasTexture, Color, LinearSRGBColorSpace, SRGBColorSpace } from "thre
  * colour, and a material tints them.
  */
 
-const TOKENS = ["bg", "ink", "glow", "brass", "shell", "shell-light", "shell-shade", "shell-slit"] as const;
+const TOKENS = ["bg", "ink", "glow", "brass", "shell", "shell-light", "shell-shade", "shell-slit", "skin", "sleeve"] as const;
 export type Token = (typeof TOKENS)[number];
 
 export interface Palette {

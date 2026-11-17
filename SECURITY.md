@@ -391,6 +391,23 @@ everyone at the table and in the lobby.
   and inlines no assets, which is what makes this possible. Only the Vite dev
   server relaxes the policy, for HMR. The Playwright test runs the production
   build under the strict policy and fails on any violation.
+- Two additions to that policy, approved by the owner on 2026-11-16 for the
+  throw's physics: `'wasm-unsafe-eval'` in `script-src` and
+  `worker-src 'self'`. Reason: the throw is simulated by Rapier
+  (`@dimforge/rapier3d`, pinned at 0.19.3), which is WebAssembly, run in a
+  Web Worker so the page never stutters. Compiling WebAssembly needs
+  `'wasm-unsafe-eval'`; it allows only that, never `eval()` or
+  `new Function()` on strings, and the wasm is a hashed same-origin file
+  from our own build (`script-src` still admits no other origin but
+  Turnstile). `worker-src 'self'` admits workers from our own origin only,
+  no `blob:` or `data:`. Nothing else was relaxed: no `unsafe-eval`, no
+  `unsafe-inline`. The server's test (`packages/server/test/webclient.test.ts`)
+  checks that these are the only unsafe-looking tokens, and the Playwright
+  run checks the wasm loads, brotli-compressed, under the policy.
+- The physics decides nothing. It only animates: the faces are the server's
+  (rule 1), and the client turns a shell's visible mesh over to show them
+  (`packages/web/src/lib/throw/playback.ts`). Its starting values come from a
+  seeded generator keyed on the round id, never `Math.random` (rule 2).
 - `@kauda/web` cannot render HTML from strings: its ESLint config bans
   `dangerouslySetInnerHTML`, `innerHTML`/`outerHTML`, `insertAdjacentHTML`
   and `document.write`, and `pnpm build` runs the linter first. Server

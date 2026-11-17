@@ -102,16 +102,49 @@ The table screen has two layers: the board, with the seats at its edges, and
 your actions, the round log and fairness, in a bottom sheet on a phone and a
 side panel on a wide screen.
 
-The board is a still 3D scene (three.js through React Three Fiber; no throw
-animation or physics yet): `BoardStage`
+The board is a 3D scene (three.js through React Three Fiber): `BoardStage`
 (`packages/web/src/components/table/BoardStage.tsx`) lazy-loads
 `board3d/Stage3D.tsx` as its own chunk, so sign-in and the lobby never
-download three.js; the build fails if it reaches the entry chunk, and prints
-the 3D chunk's size. Where WebGL is missing, or the scene throws or loses
-its context, the 2D `Stage` takes over behind the same props. Seat names,
-chips and the result are DOM over the canvas, never WebGL text. Where the
-shells lie and which way the board turns for your seat are pure functions in
-`packages/web/src/lib/board.ts`, tested in `test/board.test.ts`.
+download three.js; the build fails if it reaches the entry chunk. While the
+chunk downloads, the 2D shells hold the board. Where WebGL is missing, or
+the scene throws or loses its context, the 2D `Stage` takes over behind the
+same props. Seat names, chips and the result are DOM over the canvas, never
+WebGL text. Which way the board turns for your seat is in
+`packages/web/src/lib/board.ts`.
+
+The throw is real physics (Rapier, `@dimforge/rapier3d` pinned at 0.19.3),
+simulated ahead of time in a Web Worker and played back
+(`packages/web/src/lib/throw/`):
+
+- Each shell's collider is the same shape both sides up, so the physics
+  cannot favour a face, and the throw depends on the round id alone. The
+  worker simulates a round's throw as soon as the round starts.
+- When the result arrives, a shell whose collider finished the wrong way up
+  has its visible mesh turned over inside the collider from the throw's
+  first frame, so shell i lands showing the server's face i
+  (`playback.ts flipsFor`).
+- A throw must land countable (every shell flat, apart, inside the rim);
+  otherwise the next seeded attempt is tried, up to 20, then the seeded
+  scatter. Every value comes from a generator seeded with the round id and
+  attempt, so every player sees the same throw.
+- The page holds back the result, chips and round log until the shells rest
+  (`lib/tableStore.ts`); the board's timeline is `lib/throw/director.ts`.
+- The thrower's hand (built in code, `board3d/Hand.tsx`) reaches in from
+  their side when the throwing phase opens, scoops the shells into its fist,
+  holds and shakes, then flings them out at the physics' release point and
+  moment (`lib/throw/handSequence.ts`). Shells that must show the other face
+  are turned while hidden in the fist. No hand under reduced motion or on the
+  2D board.
+- Once the shells rest, the result is shown in steps (`lib/ceremony.ts`,
+  played by `lib/tableStore.ts`): the face-up shells are counted and lit
+  (at most 2 s), the result, the chips travelling between the panels as
+  brass tokens (the floats are the server's deltas; totals only ever tick
+  from the server's before to its after), then the log entry. A page that
+  was not watching gets the final state at once.
+
+Built files are written with brotli and gzip copies beside them, and the
+game server serves whichever the browser accepts (`webClient.ts`). `pnpm
+build` prints what the browser downloads.
 
 The look (a dark walnut board in low light) lives in design tokens in
 `packages/web/src/index.css`, and nowhere else: Tailwind's own palette is

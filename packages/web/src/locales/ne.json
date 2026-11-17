@@ -126,6 +126,10 @@
     "tiryo": {
       "label": "ति-र्यो",
       "tip": "Ti-ryo: a miss, the thrower pays"
+    },
+    "ghanti": {
+      "label": "घण्टी",
+      "tip": "Ghanti: paid by the thrower on the first hit of a turn, shared among the other seats"
     }
   },
   "errors": {
@@ -171,6 +175,7 @@
     "cancelReservation": "आरक्षण रद्द",
     "throw": "कौडा फाल्नुहोस्",
     "yourThrow": "तपाईंको पालो! कौडा फाल्नुहोस्।",
+    "pickingUp": "कौडा उठाउँदै…",
     "myChips": "मेरो चिप",
     "seatedAs": "तपाईं {{seat}} मा हुनुहुन्छ",
     "watching": "तपाईं च्याँखे हुनुहुन्छ",
@@ -207,7 +212,13 @@
     "checkPublished": "बाजी अघि देखाइएको प्रतिबद्धता नै",
     "checkFaces": "बीउबाट उही कौडा र उही विजेता",
     "notSeenPublished": "(यो पेज ढिलो जोडियो, प्रतिबद्धता देखेन)",
-    "wins": "जित्यो!"
+    "wins": "जित्यो!",
+    "push": "{{seat}} खाली: कसैलाई केही परेन",
+    "stakeCap": "सीमा",
+    "stakeCapTip": "दाउ अब बढ्दैन: सीमामा पुग्यो",
+    "betBy": "{{name}}: {{chips}} चिप",
+    "myBet": "तपाईंको बाजी",
+    "countLabel": "उत्तानो गन्दै"
   },
   "refusals": {
     "wrong-phase": "यो कुरा अहिले गर्न मिल्दैन।",
@@ -223,6 +234,7 @@
     "thrower-cannot-cover": "फाल्नेसँग यति बाजी तिर्ने चिप छैन।",
     "no-bet": "तपाईंको कुनै बाजी छैन।",
     "not-thrower": "तपाईंको पालो होइन।",
+    "not-yet": "एकछिन पर्खनुहोस्: कौडा उठाउँदैछ।",
     "not-at-table": "तपाईं टेबलमा हुनुहुन्न।",
     "table-full": "टेबल भरिएको छ।",
     "table-paused": "टेबल रोकिएको छ।",

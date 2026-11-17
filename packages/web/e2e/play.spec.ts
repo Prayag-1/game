@@ -17,12 +17,18 @@ test("signs in under the strict CSP with an httpOnly cookie, reaches a table, lo
   page.on("request", (r) => {
     if (r.resourceType() === "script") scripts.push(r.url());
   });
+  const wasm: { url: string; type: string; encoding: string }[] = [];
+  page.on("response", (r) => {
+    if (r.url().endsWith(".wasm")) wasm.push({ url: r.url(), type: r.headers()["content-type"] ?? "", encoding: r.headers()["content-encoding"] ?? "" });
+  });
   const response = await page.goto("/");
   const csp = response?.headers()["content-security-policy"] ?? "";
   expect(csp).toContain("default-src 'none'");
-  expect(csp).toContain("script-src 'self' https://challenges.cloudflare.com");
+  // The two additions the throw's physics needs, and nothing else unsafe.
+  expect(csp).toContain("script-src 'self' 'wasm-unsafe-eval' https://challenges.cloudflare.com");
+  expect(csp).toContain("worker-src 'self'");
   expect(csp).not.toContain("unsafe-inline");
-  expect(csp).not.toContain("unsafe-eval");
+  expect(csp.replace("'wasm-unsafe-eval'", "")).not.toContain("unsafe-eval");
   await expect(page.locator("html")).toHaveAttribute("lang", "ne");
 
   await signIn(page, "E2E खेलाडी");
@@ -32,8 +38,9 @@ test("signs in under the strict CSP with an httpOnly cookie, reaches a table, lo
   expect(cookie?.sameSite).toBe("Lax");
   expect(await page.evaluate(() => document.cookie)).toBe("");
   const startingChips = (await page.getByTestId("my-chips").textContent()) ?? "";
-  // Sign-in and the lobby never download three.js: it is only in the table's 3D chunk.
+  // Sign-in and the lobby never download three.js, nor the physics: only the table does.
   expect(scripts.filter((url) => url.includes("Stage3D"))).toEqual([]);
+  expect(wasm).toEqual([]);
 
   await quickPlay(page);
   // Four seats with their Nepali names, in a round that is going on.
@@ -45,6 +52,12 @@ test("signs in under the strict CSP with an httpOnly cookie, reaches a table, lo
   await expect(stage).toHaveAttribute("data-ready", "true", { timeout: 20_000 });
   await expect(stage).toHaveAttribute("data-shells", "16");
   expect(scripts.filter((url) => url.includes("Stage3D"))).toHaveLength(1);
+  // The physics loads once the board is showing: Rapier's WebAssembly, precompressed, under the strict CSP.
+  await expect.poll(() => wasm.length, { timeout: 20_000 }).toBe(1);
+  expect(wasm[0]?.type).toBe("application/wasm");
+  expect(wasm[0]?.encoding).toBe("br");
+  // The settled rounds' shells lie where the physics left them.
+  await expect(stage).toHaveAttribute("data-layout", "sim", { timeout: 30_000 });
   await expect(page.getByTestId("chyakhe-list")).toContainText("E2E खेलाडी");
 
   // Rounds settle into the log, and the browser checks every seed.
@@ -87,7 +100,12 @@ test("sits, throws on their turn, chips move by the stake, a refresh keeps the s
   const seen = new Set(await page.getByTestId("log-row").evaluateAll((rows) => rows.map((r) => r.getAttribute("data-round-id"))));
   const before = await chips(page);
   const ghanti = Number(await page.getByTestId("house-rules").getAttribute("data-ghanti"));
+  const stage = page.getByTestId("stage");
+  // My hand already has the shells: it came for them when the throwing phase opened.
+  await expect(stage).not.toHaveAttribute("data-hand", "none");
   await throwButton.click();
+  // It shakes and throws, then the shells fly.
+  await expect(stage).toHaveAttribute("data-throw", /hand|flight/, { timeout: 2_000 });
 
   // My round settles. My chips move by exactly what the rules give for it.
   await openSheet(page);
@@ -104,6 +122,9 @@ test("sits, throws on their turn, chips move by the stake, a refresh keeps the s
   expect(stake).toBeGreaterThan(0);
   expect(delta).toBe(expected);
   await expect.poll(() => chips(page)).toBe(before + delta);
+  // Shown only once the shells are at rest.
+  await expect(stage).toHaveAttribute("data-throw", "still");
+  await expect(stage).toHaveAttribute("data-layout", "sim");
   expect(await mine.locator('[data-check="bad"]').count()).toBe(0);
 
   // Refresh: the same player, straight back to the same seat, no sign-in.

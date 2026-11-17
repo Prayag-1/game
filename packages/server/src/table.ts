@@ -63,8 +63,15 @@ export interface Timings {
 export const DEFAULT_TIMINGS: Timings = {
   bettingMs: 8_000,
   throwingMs: 10_000,
-  revealMs: 4_500,
-  botThrowDelayMs: 1_200,
+  // Long enough for the board to play the throw before the next round: the
+  // gather (0.4 s), the longest throw the physics accepts (3 s simulated,
+  // shown at 0.8x: 3.75 s),
+  // at least 2.5 s with the shells at rest, about 2 s for a shell-by-shell
+  // count, and 0.5 s for the network. The page holds the result back until
+  // the shells are at rest (packages/web/src/lib/tableStore.ts).
+  revealMs: 9_500,
+  // A bot holds the shells this long before throwing, so everyone sees its hand pick them up.
+  botThrowDelayMs: 1_500,
   botBetDelayMs: 1_500,
 };
 
@@ -137,7 +144,9 @@ export type RejectReason =
   | "too-many-chyakhe"
   | "thrower-cannot-cover"
   | "no-bet"
-  | "not-thrower";
+  | "not-thrower"
+  /** The thrower's hand is still picking the shells up (the same hold a bot keeps). */
+  | "not-yet";
 
 export type CommandResult =
   | { readonly ok: true }
@@ -598,6 +607,9 @@ export class Table {
       case "throw": {
         if (this.#phase !== "throwing") return reject("wrong-phase");
         if (seat === null || seat !== this.#thrower) return reject("not-thrower");
+        // Every thrower holds the shells as long as a bot does, so the hand is seen to pick them up
+        // and the reveal's timing holds (DEFAULT_TIMINGS.revealMs).
+        if (this.#now() < this.#phaseStartedAt + this.timings.botThrowDelayMs) return reject("not-yet");
         this.#throw(this.#now());
         return OK;
       }

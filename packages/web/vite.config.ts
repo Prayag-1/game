@@ -1,7 +1,11 @@
 /// <reference types="vitest/config" />
 import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
-import { gzipSync } from "node:zlib";
+import { readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { brotliCompressSync, gzipSync, constants as zlibConstants } from "node:zlib";
+import wasm from "vite-plugin-wasm";
 import { defineConfig, loadEnv, type Plugin, type Rollup } from "vite";
 
 /** Cloudflare's documented always-pass test site key. Public, and useless in production. */
@@ -52,6 +56,68 @@ export function keepThreeOutOfEntry(): Plugin {
   };
 }
 
+/** Text assets, and the physics' WebAssembly, are served precompressed. */
+const COMPRESSIBLE = /\.(?:js|mjs|css|html|svg|json|webmanifest|txt|wasm)$/;
+
+/**
+ * Writes a brotli (.br) and a gzip (.gz) copy beside every compressible file
+ * in the build, at the strongest settings (it is done once, at build time),
+ * keeping a copy only when it is smaller. The game server serves the copy
+ * that matches the request's Accept-Encoding (packages/server/src/webClient.ts).
+ * Then prints what the browser really downloads for the parts that matter.
+ */
+export function precompress(): Plugin {
+  let outDir = "dist";
+  return {
+    name: "kauda:precompress",
+    apply: "build",
+    configResolved(config) {
+      outDir = config.build.outDir;
+    },
+    closeBundle() {
+      const sizes = new Map<string, { raw: number; br: number; gz: number }>();
+      const walk = (dir: string) => {
+        for (const name of readdirSync(dir)) {
+          const full = join(dir, name);
+          if (statSync(full).isDirectory()) walk(full);
+          else if (COMPRESSIBLE.test(name)) {
+            const body = readFileSync(full);
+            const br = brotliCompressSync(body, {
+              params: { [zlibConstants.BROTLI_PARAM_QUALITY]: zlibConstants.BROTLI_MAX_QUALITY, [zlibConstants.BROTLI_PARAM_SIZE_HINT]: body.length },
+            });
+            const gz = gzipSync(body, { level: 9 });
+            if (br.length < body.length) writeFileSync(`${full}.br`, br);
+            if (gz.length < body.length) writeFileSync(`${full}.gz`, gz);
+            sizes.set(name, { raw: body.length, br: Math.min(br.length, body.length), gz: Math.min(gz.length, body.length) });
+          }
+        }
+      };
+      walk(outDir);
+      const kb = (n: number) => `${(n / 1024).toFixed(1)} KB`.padStart(10);
+      const row = (label: string, test: RegExp) => {
+        const total = { raw: 0, br: 0, gz: 0 };
+        for (const [name, s] of sizes) {
+          if (!test.test(name)) continue;
+          total.raw += s.raw;
+          total.br += s.br;
+          total.gz += s.gz;
+        }
+        if (total.raw > 0) console.log(`  ${label.padEnd(26)} ${kb(total.raw)} raw ${kb(total.gz)} gzip ${kb(total.br)} brotli`);
+      };
+      // The entry is the module script index.html names; other index-*.js chunks load lazily.
+      const entry = /src="\/assets\/([^"]+\.js)"/.exec(readFileSync(join(outDir, "index.html"), "utf8"))?.[1] ?? "";
+      const escaped = entry.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      console.log("\n  What the browser downloads (precompressed copies):");
+      row("entry script", new RegExp(`^${escaped}$`));
+      row("network client (lazy)", new RegExp(`^(?!${escaped}$)index-.*\\.js$`));
+      row("entry styles", /^index-.*\.css$/);
+      row("3D board chunk", /^Stage3D-.*\.js$/);
+      row("physics worker (JS)", /^throw\.worker-.*\.js$/);
+      row("Rapier WebAssembly", /\.wasm$/);
+    },
+  };
+}
+
 export default defineConfig(({ mode, command }) => {
   const env = loadEnv(mode, process.cwd(), "VITE_");
 
@@ -74,7 +140,11 @@ export default defineConfig(({ mode, command }) => {
   }
 
   return {
-    plugins: [react(), tailwindcss(), keepThreeOutOfEntry()],
+    // vite-plugin-wasm: Rapier's WebAssembly, imported by the physics worker,
+    // is emitted as its own same-origin .wasm file (never inlined).
+    plugins: [react(), tailwindcss(), keepThreeOutOfEntry(), wasm(), precompress()],
+    // The physics worker is an ES module worker (iOS Safari 15+), with the same wasm loading.
+    worker: { format: "es", plugins: () => [wasm()] },
     define: { "import.meta.env.VITE_TURNSTILE_SITE_KEY": JSON.stringify(siteKey) },
     // An inline PostCSS config stops Vite searching parent directories for
     // one (see packages/server/vitest.config.ts). Tailwind runs as a Vite
@@ -118,7 +188,8 @@ export default defineConfig(({ mode, command }) => {
       headers: {
         "Content-Security-Policy": [
           "default-src 'self'",
-          "script-src 'self' 'unsafe-inline' https://challenges.cloudflare.com",
+          "script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' https://challenges.cloudflare.com",
+          "worker-src 'self'",
           "style-src 'self' 'unsafe-inline'",
           `connect-src 'self' ws://127.0.0.1:${DEV_PORT} ws://localhost:${DEV_PORT}`,
           "frame-src https://challenges.cloudflare.com",
@@ -130,6 +201,11 @@ export default defineConfig(({ mode, command }) => {
       },
     },
     test: {
+      // Rapier's package names only a "module" entry, which Node-side
+      // resolution ignores; point tests at it, and let Vite transform it so
+      // vite-plugin-wasm loads its .wasm as it does in the browser.
+      alias: { "@dimforge/rapier3d": fileURLToPath(new URL("./node_modules/@dimforge/rapier3d/rapier.js", import.meta.url)) },
+      server: { deps: { inline: [/@dimforge[\\/]rapier3d/] } },
       environment: "jsdom",
       include: ["test/**/*.test.{ts,tsx}"],
       setupFiles: ["test/setup.ts"],

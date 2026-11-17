@@ -8,7 +8,14 @@
  * through @kauda/rules from fixed seeds, so their deltas, hashes and the
  * browser's fairness check are all genuine.
  *
- *   ?screen=signin | lobby | table
+ *   ?screen=signin | lobby | table | hand | count
+ *
+ * "hand" is the table one round on, in its throwing phase, with me (teeya)
+ * to throw: a page arriving then finds my hand holding the shells.
+ *
+ * "count" is round 7 arriving live (its throwing view, then its result), its
+ * steps frozen part-way through the count (COUNT_AT ms after the shells rest).
+ * "table" is the final state: a page arriving after the round.
  */
 import { DEFAULT_HOUSE_RULES, SHELL_COUNT, seatForFaceCount, settleRound, type SeatId } from "@kauda/rules";
 import { StrictMode } from "react";
@@ -16,7 +23,7 @@ import { createRoot } from "react-dom/client";
 import { MemoryRouter } from "react-router";
 import { App } from "../../src/App";
 import { initI18n } from "../../src/i18n";
-import { ingest, useTable } from "../../src/lib/tableStore";
+import { freezeCeremony, ingest, useTable } from "../../src/lib/tableStore";
 import "../../src/index.css";
 
 const screen = new URLSearchParams(window.location.search).get("screen") ?? "signin";
@@ -87,7 +94,11 @@ async function sha256(b: Uint8Array): Promise<string> {
   return hex(new Uint8Array(await crypto.subtle.digest("SHA-256", b as Uint8Array<ArrayBuffer>)));
 }
 
-async function playTable(): Promise<void> {
+/** Into the count: three of round 7's six face-up shells lit. */
+const COUNT_AT = 625;
+
+async function playTable(mode: "table" | "hand" | "count"): Promise<void> {
+  const throwingNext = mode === "hand";
   const chips: Record<string, number> = { [ME.id]: 2_000, "bot:t:1": 2_000, "guest:hari": 2_000, "bot:t:2": 2_000, "guest:maya": 2_000, "bot:t:3": 2_000 };
   const rounds = [];
   let thrower: SeatId = "panja";
@@ -130,16 +141,37 @@ async function playTable(): Promise<void> {
     published: Object.fromEntries(rounds.map((r) => [r.roundId, r.commitHash])),
   });
   ingest("welcome", { playerId: ME.id, name: ME.name, minChipsToSit: 80, standardBuyIn: 2_000 });
-  for (const r of rounds) ingest("round", r);
+  const live = mode === "count" ? rounds.at(-1) : undefined;
+  for (const r of rounds) if (r !== live) ingest("round", r);
   const player = (p: { playerId: string; name: string; isBot: boolean; connected: boolean }) => ({ ...p, chips: chips[p.playerId] ?? 0 });
+  if (live !== undefined) {
+    // Round 7 in play: the chips before it, its thrower and stake, then its result arrives.
+    const before = (p: { playerId: string; name: string; isBot: boolean; connected: boolean }) => ({ ...p, chips: (chips[p.playerId] ?? 0) - (live.deltas[p.playerId] ?? 0) });
+    ingest("view", {
+      tableId: "Hx7Kq2mPa",
+      phase: "throwing",
+      roundId: live.roundId,
+      thrower: live.thrower,
+      streak: live.streak,
+      stake: live.stake,
+      commitHash: live.commitHash,
+      seats: Object.fromEntries(Object.entries(SEATS).map(([seat, p]) => [seat, before(p)])),
+      chyakhe: CHYAKHE.map(before),
+      bets: live.chyakhe,
+      phaseEndsAt: Date.now() + 3_000,
+      reservations: [],
+      lastRound: rounds.at(-2),
+      rules: RULES,
+    });
+  }
   ingest("view", {
     tableId: "Hx7Kq2mPa",
-    phase: "revealing",
-    roundId: "fixture:7",
-    thrower,
+    phase: throwingNext ? "throwing" : "revealing",
+    roundId: throwingNext ? "fixture:8" : "fixture:7",
+    thrower: throwingNext ? "teeya" : thrower,
     streak,
     stake: RULES.thini * Math.min(2 ** streak, RULES.maxStakeMultiplier),
-    commitHash: null,
+    commitHash: throwingNext ? "f".repeat(64) : null,
     seats: Object.fromEntries(Object.entries(SEATS).map(([seat, p]) => [seat, player(p)])),
     chyakhe: CHYAKHE.map(player),
     bets: [],
@@ -148,8 +180,13 @@ async function playTable(): Promise<void> {
     lastRound: rounds.at(-1),
     rules: RULES,
   });
-  // Let the browser finish checking every seed before the page says it is ready.
-  for (let i = 0; i < 100 && Object.keys(useTable.getState().fairness).length < rounds.length; i += 1) {
+  if (live !== undefined) {
+    ingest("round", live);
+    freezeCeremony(COUNT_AT);
+  }
+  // Let the browser finish checking every seed (in the log so far) before the page says it is ready.
+  const logged = live === undefined ? rounds.length : rounds.length - 1;
+  for (let i = 0; i < 100 && Object.keys(useTable.getState().fairness).length < logged; i += 1) {
     await new Promise((r) => setTimeout(r, 10));
   }
 }
@@ -158,12 +195,12 @@ async function playTable(): Promise<void> {
 
 async function main(): Promise<void> {
   initI18n("ne");
-  if (screen === "table") await playTable();
+  if (screen === "table" || screen === "hand" || screen === "count") await playTable(screen);
   const root = document.getElementById("root");
   if (root === null) throw new Error("no #root");
   createRoot(root).render(
     <StrictMode>
-      <MemoryRouter initialEntries={[screen === "table" ? "/table/Hx7Kq2mPa" : "/"]}>
+      <MemoryRouter initialEntries={[screen === "table" || screen === "hand" || screen === "count" ? "/table/Hx7Kq2mPa" : "/"]}>
         <App />
       </MemoryRouter>
     </StrictMode>,
